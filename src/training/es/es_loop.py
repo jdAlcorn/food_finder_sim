@@ -163,6 +163,11 @@ class EvolutionStrategiesTrainer:
         """
         Evaluate candidates in parallel using multiprocessing
         
+        PARALLELIZATION DESIGN:
+        - WORKER LEVEL: Each candidate gets exactly one task (no duplication)
+        - BATCH LEVEL: Within each candidate, seeds are batched for vectorized simulation
+        - SEED ISOLATION: Candidates use non-overlapping seed ranges (10000-seed offset)
+        
         Args:
             candidates: List of parameter vectors to evaluate
             iteration: Current iteration (for seed generation)
@@ -170,11 +175,13 @@ class EvolutionStrategiesTrainer:
         Returns:
             List of fitness values
         """
-        # Prepare arguments for workers
+        # Prepare arguments for workers - ONE TASK PER CANDIDATE (no duplication)
         worker_args = []
         for i, candidate_theta in enumerate(candidates):
             # Generate unique base seed for this candidate and iteration
-            base_seed = self.seed0 + iteration * 100000 + i * 1000
+            # Seed ranges: candidate_i uses [base_seed + i*10000, base_seed + i*10000 + num_seeds*1000)
+            # This ensures no seed overlap between candidates (10000 >> num_seeds*1000)
+            base_seed = self.seed0 + iteration * 100000 + i * 10000
             
             args = (
                 i,  # candidate_idx

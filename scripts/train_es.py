@@ -170,7 +170,7 @@ def initialize_training(args) -> tuple:
 
 
 def save_checkpoint(args, generation, theta, best_theta, best_fitness, sim_config, 
-                   model_ctor, model_kwargs, stats_history):
+                   model_ctor, model_kwargs, stats_history, is_best=False):
     """Save training checkpoint"""
     # Create policy instance with best parameters
     policy = TorchMLPPolicy(
@@ -208,6 +208,12 @@ def save_checkpoint(args, generation, theta, best_theta, best_fitness, sim_confi
     # Also save as "latest"
     latest_path = os.path.join(args.output_dir, f"{args.save_prefix}_latest.json")
     save_policy(latest_path, 'TorchMLP', policy.get_params(), sim_config, metadata, policy)
+    
+    # If this is the best model, also save as "best"
+    if is_best:
+        best_path = os.path.join(args.output_dir, f"{args.save_prefix}_best.json")
+        save_policy(best_path, 'TorchMLP', policy.get_params(), sim_config, metadata, policy)
+        return best_path
     
     return checkpoint_path
 
@@ -278,6 +284,14 @@ def main():
             if candidate_best_fitness > best_fitness_so_far:
                 best_fitness_so_far = candidate_best_fitness
                 best_theta = candidate_best_theta.clone()
+                
+                # Save best model immediately when new best is found
+                best_checkpoint_path = save_checkpoint(
+                    args, generation + 1, theta, best_theta, best_fitness_so_far,
+                    sim_config, model_ctor, model_kwargs, stats_history,
+                    is_best=True
+                )
+                print(f"🏆 New best fitness {best_fitness_so_far:.2f}! Saved: {best_checkpoint_path}")
             
             # Record stats
             gen_elapsed = time.time() - gen_start_time
@@ -306,7 +320,8 @@ def main():
             if (generation + 1) % args.save_interval == 0 or generation == start_generation + args.generations - 1:
                 checkpoint_path = save_checkpoint(
                     args, generation + 1, theta, best_theta, best_fitness_so_far,
-                    sim_config, model_ctor, model_kwargs, stats_history
+                    sim_config, model_ctor, model_kwargs, stats_history,
+                    is_best=False
                 )
                 print(f"Saved checkpoint: {checkpoint_path}")
     
@@ -315,7 +330,8 @@ def main():
         # Save final checkpoint
         checkpoint_path = save_checkpoint(
             args, generation, theta, best_theta, best_fitness_so_far,
-            sim_config, model_ctor, model_kwargs, stats_history
+            sim_config, model_ctor, model_kwargs, stats_history,
+            is_best=False
         )
         print(f"Saved final checkpoint: {checkpoint_path}")
     

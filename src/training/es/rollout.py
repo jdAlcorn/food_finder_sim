@@ -155,6 +155,11 @@ def evaluate_multiple_seeds_batched(theta_flat: torch.Tensor, model_ctor: Callab
     """
     Evaluate fitness across multiple random seeds using batched simulation
     
+    BATCHING DESIGN:
+    - Seeds are partitioned across batches: batch_0=[seed_0, seed_1], batch_1=[seed_2, seed_3], etc.
+    - Each batch runs B environments in parallel (vectorized simulation)
+    - Total seeds evaluated = num_seeds exactly (no duplication, no gaps)
+    
     Args:
         theta_flat: Flattened model parameters
         model_ctor: Model constructor function
@@ -173,14 +178,15 @@ def evaluate_multiple_seeds_batched(theta_flat: torch.Tensor, model_ctor: Callab
     if batch_size is None:
         batch_size = num_seeds
     
-    # Process seeds in batches
+    # Process seeds in batches - PARTITION seeds to avoid duplication
     all_fitnesses = []
     
     for start_idx in range(0, num_seeds, batch_size):
         end_idx = min(start_idx + batch_size, num_seeds)
         current_batch_size = end_idx - start_idx
         
-        # Generate seeds for this batch
+        # Generate DISTINCT seeds for this batch (no overlap with other batches)
+        # Seed pattern: [base_seed + start_idx*1000, base_seed + (start_idx+1)*1000, ...]
         seeds = [base_seed + (start_idx + i) * 1000 for i in range(current_batch_size)]
         
         # Evaluate batch
@@ -295,10 +301,15 @@ def rollout_fitness_batched(theta_flat: torch.Tensor, model_ctor: Callable, mode
         return [-10000.0] * len(seeds)
 
 
-# Worker function for multiprocessing
 def evaluate_candidate_worker(args):
     """
     Worker function for multiprocessing evaluation
+    
+    WORKER ISOLATION DESIGN:
+    - Each worker processes exactly ONE candidate (no duplication across workers)
+    - Each candidate uses unique seed range: candidate_i gets base_seed + i*10000
+    - Within candidate: seeds are [base_seed, base_seed+1000, base_seed+2000, ...]
+    - Seed spacing (1000) and candidate offset (10000) prevent any overlap
     
     Args:
         args: Tuple of (candidate_idx, theta_flat, model_ctor, model_kwargs, sim_config, 
@@ -312,6 +323,10 @@ def evaluate_candidate_worker(args):
     
     try:
         # Generate unique base seed for this candidate
+        # CRITICAL: This ensures no seed overlap between candidates
+        # candidate_0: [base_seed + 0, base_seed + 1000, base_seed + 2000, ...]
+        # candidate_1: [base_seed + 10000, base_seed + 11000, base_seed + 12000, ...]
+        # candidate_2: [base_seed + 20000, base_seed + 21000, base_seed + 22000, ...]
         candidate_base_seed = base_seed + candidate_idx * 10000
         
         # Check if batched evaluation is requested

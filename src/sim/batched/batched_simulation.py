@@ -59,8 +59,13 @@ class BatchedSimulation:
         """
         Reset all environments to initial state
         
+        SEED ISOLATION DESIGN:
+        - Each environment gets a unique seed from the seeds list
+        - Seeds must be distinct to ensure different random food spawns per environment
+        - Deterministic: same seeds always produce same initial conditions
+        
         Args:
-            seeds: List of seeds for deterministic reset (length B)
+            seeds: List of seeds for deterministic reset (length B, all distinct)
         """
         if seeds is None:
             seeds = list(range(self.B))
