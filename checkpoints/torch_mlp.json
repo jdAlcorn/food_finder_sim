@@ -1,0 +1,33 @@
+{
+  "policy_name": "TorchMLP",
+  "policy_params": {
+    "hidden_dims": [256, 128],
+    "device": "cpu",
+    "v_scale": 400.0,
+    "omega_scale": 10.0,
+    "init_seed": 42,
+    "weights_path": "checkpoints/torch_mlp_weights.pt"
+  },
+  "sim_config": {
+    "world_width": 800,
+    "world_height": 800,
+    "agent_radius": 12,
+    "agent_max_thrust": 300.0,
+    "agent_max_turn_accel": 8.0,
+    "agent_linear_drag": 2.0,
+    "agent_angular_drag": 5.0,
+    "wall_restitution": 0.6,
+    "food_radius": 8,
+    "fov_degrees": 120,
+    "num_rays": 128,
+    "max_range": 300
+  },
+  "metadata": {
+    "created_by": "torch_mlp_generator",
+    "description": "PyTorch MLP policy with random initialization",
+    "version": "1.0",
+    "observation_dim": 388,
+    "model_type": "SimpleMLP",
+    "hidden_dims": [256, 128]
+  }
+}

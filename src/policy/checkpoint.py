@@ -10,11 +10,13 @@ from .base import Policy
 from .manual import ManualPolicy
 from .scripted import ScriptedPolicy
 from .nn_policy_stub import NeuralPolicyStub
+from .nn_torch_mlp import TorchMLPPolicy
 from src.sim.core import SimulationConfig
 
 
 def save_policy(path: str, policy_name: str, policy_params: Dict[str, Any], 
-                sim_config: SimulationConfig, metadata: Dict[str, Any] = None) -> None:
+                sim_config: SimulationConfig, metadata: Dict[str, Any] = None,
+                policy_instance: Policy = None) -> None:
     """
     Save policy checkpoint to JSON file
     
@@ -24,7 +26,20 @@ def save_policy(path: str, policy_name: str, policy_params: Dict[str, Any],
         policy_params: Policy-specific parameters
         sim_config: Simulation configuration
         metadata: Optional metadata dict
+        policy_instance: Optional policy instance (for saving weights)
     """
+    # Handle weights path for torch policies
+    weights_path = None
+    if policy_name == 'TorchMLP' and policy_instance is not None:
+        # Generate weights path
+        base_path = os.path.splitext(path)[0]
+        weights_path = f"{base_path}_weights.pt"
+        policy_params['weights_path'] = weights_path
+        
+        # Save model weights
+        if hasattr(policy_instance, 'save_weights'):
+            policy_instance.save_weights(weights_path)
+    
     checkpoint = {
         'policy_name': policy_name,
         'policy_params': policy_params,
@@ -39,6 +54,8 @@ def save_policy(path: str, policy_name: str, policy_params: Dict[str, Any],
         json.dump(checkpoint, f, indent=2)
     
     print(f"Saved policy checkpoint to {path}")
+    if weights_path:
+        print(f"Saved model weights to {weights_path}")
 
 
 def load_policy(path: str) -> Tuple[Policy, SimulationConfig, Dict[str, Any]]:
@@ -69,6 +86,15 @@ def load_policy(path: str) -> Tuple[Policy, SimulationConfig, Dict[str, Any]]:
         policy = ScriptedPolicy.from_params(policy_params)
     elif policy_name == 'NeuralStub':
         policy = NeuralPolicyStub.from_params(policy_params)
+    elif policy_name == 'TorchMLP':
+        policy = TorchMLPPolicy.from_params(policy_params)
+        
+        # Load weights if available
+        weights_path = policy_params.get('weights_path')
+        if weights_path and os.path.exists(weights_path):
+            policy.load_weights(weights_path)
+        else:
+            print(f"Warning: Weights file not found at {weights_path}, using random initialization")
     else:
         raise ValueError(f"Unknown policy type: {policy_name}")
     
@@ -89,22 +115,29 @@ def create_example_checkpoint(path: str = "checkpoints/example.json") -> None:
     save_policy(path, 'Scripted', policy.get_params(), config, metadata)
 
 
-def create_neural_stub_checkpoint(path: str = "checkpoints/neural_stub.json") -> None:
-    """Create a neural stub checkpoint for testing"""
-    policy = NeuralPolicyStub(v_scale=400.0, omega_scale=10.0, default_throttle=0.3)
+def create_torch_mlp_checkpoint(path: str = "checkpoints/torch_mlp.json") -> None:
+    """Create a PyTorch MLP checkpoint for testing"""
+    policy = TorchMLPPolicy(
+        hidden_dims=(256, 128),
+        device='cpu',
+        v_scale=400.0,
+        omega_scale=10.0,
+        init_seed=42  # Deterministic initialization
+    )
     config = SimulationConfig()
     metadata = {
-        'created_by': 'neural_stub_generator',
-        'description': 'Neural network policy stub with observation extraction',
+        'created_by': 'torch_mlp_generator',
+        'description': 'PyTorch MLP policy with random initialization',
         'version': '1.0',
-        'observation_dim': 128 * 3 + 4,  # vision + proprioception
-        'ready_for_nn': True
+        'observation_dim': 388,
+        'model_type': 'SimpleMLP',
+        'hidden_dims': [256, 128]
     }
     
-    save_policy(path, 'NeuralStub', policy.get_params(), config, metadata)
+    save_policy(path, 'TorchMLP', policy.get_params(), config, metadata, policy)
 
 
 if __name__ == "__main__":
     # Create example checkpoints
     create_example_checkpoint()
-    create_neural_stub_checkpoint()
+    create_torch_mlp_checkpoint()

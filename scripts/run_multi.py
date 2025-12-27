@@ -14,6 +14,7 @@ from src.viz.pygame_multi import run_multi_simulation
 from src.policy.manual import ManualPolicy
 from src.policy.scripted import ScriptedPolicy
 from src.policy.nn_policy_stub import NeuralPolicyStub
+from src.policy.nn_torch_mlp import TorchMLPPolicy
 from src.policy.checkpoint import load_policy
 from src.sim.core import SimulationConfig
 
@@ -22,7 +23,7 @@ def main():
     parser = argparse.ArgumentParser(description='Run multiple simulations in parallel')
     parser.add_argument('--num-sims', type=int, default=16,
                        help='Number of simulations to run (default: 16)')
-    parser.add_argument('--policy', choices=['manual', 'scripted', 'neural_stub', 'checkpoint'], 
+    parser.add_argument('--policy', choices=['manual', 'scripted', 'neural_stub', 'torch_mlp', 'checkpoint'], 
                        default='scripted', help='Policy type to use')
     parser.add_argument('--checkpoint', type=str,
                        help='Path to checkpoint file (required if policy=checkpoint)')
@@ -52,6 +53,8 @@ def main():
         policy_class = ScriptedPolicy
     elif args.policy == 'neural_stub':
         policy_class = NeuralPolicyStub
+    elif args.policy == 'torch_mlp':
+        policy_class = TorchMLPPolicy
     elif args.policy == 'checkpoint':
         try:
             # Load one instance to get the policy class
