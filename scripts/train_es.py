@@ -88,6 +88,12 @@ def parse_args():
     parser.add_argument('--no-antithetic', dest='antithetic', action='store_false',
                        help='Disable antithetic sampling')
     
+    # Batched evaluation parameters
+    parser.add_argument('--use-batched-eval', action='store_true', default=False,
+                       help='Use batched simulation for faster evaluation')
+    parser.add_argument('--eval-batch-size', type=int, default=None,
+                       help='Batch size for batched evaluation (default: same as eval-seeds)')
+    
     return parser.parse_args()
 
 
@@ -155,7 +161,9 @@ def initialize_training(args) -> tuple:
         fitness_kwargs={
             'food_reward_multiplier': args.food_reward,
             'proximity_reward_scale': args.proximity_reward_scale
-        }
+        },
+        use_batched_eval=args.use_batched_eval,
+        eval_batch_size=args.eval_batch_size
     )
     
     return trainer, theta, start_generation, best_fitness_so_far, sim_config, model_ctor, model_kwargs
@@ -240,6 +248,10 @@ def main():
     print(f"Hidden dims: {args.hidden_dims}")
     print(f"Episode length: {args.episode_length} steps")
     print(f"Workers: {args.workers or 'auto'}")
+    print(f"Batched evaluation: {args.use_batched_eval}")
+    if args.use_batched_eval:
+        batch_size = args.eval_batch_size or args.eval_seeds
+        print(f"Eval batch size: {batch_size}")
     print(f"Output dir: {args.output_dir}")
     print()
     

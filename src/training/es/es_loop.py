@@ -22,7 +22,8 @@ class EvolutionStrategiesTrainer:
                  sim_config: SimulationConfig, pop_size: int = 128, sigma: float = 0.02,
                  alpha: float = 0.01, T: int = 600, dt: float = 1/60, seed0: int = 42,
                  num_workers: int = None, eval_seeds_per_candidate: int = 1, 
-                 antithetic: bool = True, fitness_kwargs: Dict[str, Any] = None):
+                 antithetic: bool = True, fitness_kwargs: Dict[str, Any] = None,
+                 use_batched_eval: bool = False, eval_batch_size: int = None):
         """
         Initialize ES trainer
         
@@ -40,6 +41,8 @@ class EvolutionStrategiesTrainer:
             eval_seeds_per_candidate: Number of seeds to evaluate per candidate
             antithetic: Whether to use antithetic sampling
             fitness_kwargs: Additional arguments for fitness function
+            use_batched_eval: Whether to use batched simulation for evaluation
+            eval_batch_size: Batch size for batched evaluation (default: eval_seeds_per_candidate)
         """
         self.model_ctor = model_ctor
         self.model_kwargs = model_kwargs
@@ -53,6 +56,13 @@ class EvolutionStrategiesTrainer:
         self.eval_seeds_per_candidate = eval_seeds_per_candidate
         self.antithetic = antithetic
         self.fitness_kwargs = fitness_kwargs or {}
+        self.use_batched_eval = use_batched_eval
+        self.eval_batch_size = eval_batch_size or eval_seeds_per_candidate
+        
+        # Add batched evaluation flags to fitness kwargs
+        if use_batched_eval:
+            self.fitness_kwargs['use_batched'] = True
+            self.fitness_kwargs['batch_size'] = self.eval_batch_size
         
         # Set up multiprocessing
         if num_workers is None:
@@ -75,6 +85,9 @@ class EvolutionStrategiesTrainer:
         print(f"  Workers: {num_workers}")
         print(f"  Seeds per candidate: {eval_seeds_per_candidate}")
         print(f"  Antithetic sampling: {antithetic}")
+        print(f"  Batched evaluation: {use_batched_eval}")
+        if use_batched_eval:
+            print(f"  Eval batch size: {self.eval_batch_size}")
     
     def step(self, theta_flat: torch.Tensor, iteration: int) -> Tuple[torch.Tensor, Dict[str, Any], torch.Tensor, float]:
         """
