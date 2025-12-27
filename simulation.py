@@ -21,8 +21,8 @@ FPS = 60
 
 # Agent constants
 AGENT_RADIUS = 12
-AGENT_MAX_THRUST = 300.0  # pixels/s²
-AGENT_MAX_TURN_ACCEL = 8.0  # rad/s²
+AGENT_MAX_THRUST = 600.0  # pixels/s²
+AGENT_MAX_TURN_ACCEL = 12.0  # rad/s²
 AGENT_LINEAR_DRAG = 2.0
 AGENT_ANGULAR_DRAG = 5.0
 WALL_RESTITUTION = 0.6
@@ -58,11 +58,8 @@ class Agent:
         self.throttle = 0.0  # 0 to 1
         
     def update(self, dt, steer_input, throttle_input):
-        # Update throttle based on input
-        if throttle_input > 0:
-            self.throttle = min(1.0, self.throttle + 3.0 * dt)
-        elif throttle_input < 0:
-            self.throttle = max(0.0, self.throttle - 3.0 * dt)
+        # Direct throttle control - only apply force while key is held
+        self.throttle = max(0.0, throttle_input)  # throttle_input is 0 or 1
         
         # Forward direction
         fx = math.cos(self.theta)
@@ -183,8 +180,6 @@ def intersect_ray_segment(origin_x, origin_y, dir_x, dir_y, p1_x, p1_y, p2_x, p2
     seg_y = p2_y - p1_y
     
     # Vector from segment start to ray origin
-    #h_x = origin_x - p1_x
-    #h_y = origin_y - p1_y
     h_x = p1_x - origin_x
     h_y = p1_y - origin_y
     
@@ -196,7 +191,6 @@ def intersect_ray_segment(origin_x, origin_y, dir_x, dir_y, p1_x, p1_y, p2_x, p2
     
     f = 1.0 / a
     s = f * (h_x * seg_y - h_y * seg_x)
-    #t = f * (dir_x * h_y - dir_y * h_x)
     t = f * (h_x * dir_y - h_y * dir_x)
     
     # More robust checks: s must be positive (forward ray) and t must be in [0,1] (on segment)
@@ -217,10 +211,10 @@ def cast_ray(origin_x, origin_y, dir_x, dir_y, food):
     
     # Check wall intersections (4 segments) with different colors for debugging
     walls = [
-        (0, 0, WINDOW_WIDTH, 0, (255, 100, 100)),  # Top wall - Red
-        (WINDOW_WIDTH, 0, WINDOW_WIDTH, WINDOW_HEIGHT, (100, 255, 100)),  # Right wall - Green
-        (WINDOW_WIDTH, WINDOW_HEIGHT, 0, WINDOW_HEIGHT, (100, 100, 255)),  # Bottom wall - Blue
-        (0, WINDOW_HEIGHT, 0, 0, (255, 255, 100))  # Left wall - Yellow
+        (0, 0, WINDOW_WIDTH, 0, (255, 255, 255)),  # Top wall - White
+        (WINDOW_WIDTH, 0, WINDOW_WIDTH, WINDOW_HEIGHT, (0, 255, 255)),  # Right wall - Cyan
+        (WINDOW_WIDTH, WINDOW_HEIGHT, 0, WINDOW_HEIGHT, (255, 0, 255)),  # Bottom wall - Magenta
+        (0, WINDOW_HEIGHT, 0, 0, (255, 165, 0))  # Left wall - Orange
     ]
     
     for wall_idx, (p1_x, p1_y, p2_x, p2_y, wall_color) in enumerate(walls):
@@ -345,8 +339,8 @@ def draw_vision(screen, agent, distances, hit_points, show_vision):
     right_y = agent.y + cone_length * math.sin(right_angle)
     
     # Draw FOV cone lines
-    pygame.draw.line(screen, YELLOW, (agent.x, agent.y), (left_x, left_y), 1)
-    pygame.draw.line(screen, YELLOW, (agent.x, agent.y), (right_x, right_y), 1)
+    #pygame.draw.line(screen, YELLOW, (agent.x, agent.y), (left_x, left_y), 1)
+    #pygame.draw.line(screen, YELLOW, (agent.x, agent.y), (right_x, right_y), 1)
     
     # Draw visible region polygon
     if len(hit_points) > 0:
@@ -426,7 +420,7 @@ def draw_ui(screen, font, agent, fps, show_vision):
     # Controls
     controls = [
         "Controls:",
-        "W/S - Throttle up/down",
+        "W - Forward thrust (hold)",
         "A/D - Steer left/right",
         "V - Toggle vision display",
         "ESC - Quit"
@@ -469,12 +463,10 @@ def main():
         # Handle continuous input
         keys = pygame.key.get_pressed()
         
-        # Throttle input
+        # Throttle input - direct control (0 or 1)
         throttle_input = 0
         if keys[pygame.K_w]:
             throttle_input = 1
-        elif keys[pygame.K_s]:
-            throttle_input = -1
         
         # Steering input
         steer_input = 0
