@@ -9,6 +9,7 @@ from typing import Dict, Any, Tuple
 from .base import Policy
 from .manual import ManualPolicy
 from .scripted import ScriptedPolicy
+from .nn_policy_stub import NeuralPolicyStub
 from src.sim.core import SimulationConfig
 
 
@@ -66,6 +67,8 @@ def load_policy(path: str) -> Tuple[Policy, SimulationConfig, Dict[str, Any]]:
         policy = ManualPolicy()
     elif policy_name == 'Scripted':
         policy = ScriptedPolicy.from_params(policy_params)
+    elif policy_name == 'NeuralStub':
+        policy = NeuralPolicyStub.from_params(policy_params)
     else:
         raise ValueError(f"Unknown policy type: {policy_name}")
     
@@ -86,6 +89,22 @@ def create_example_checkpoint(path: str = "checkpoints/example.json") -> None:
     save_policy(path, 'Scripted', policy.get_params(), config, metadata)
 
 
+def create_neural_stub_checkpoint(path: str = "checkpoints/neural_stub.json") -> None:
+    """Create a neural stub checkpoint for testing"""
+    policy = NeuralPolicyStub(v_scale=400.0, omega_scale=10.0, default_throttle=0.3)
+    config = SimulationConfig()
+    metadata = {
+        'created_by': 'neural_stub_generator',
+        'description': 'Neural network policy stub with observation extraction',
+        'version': '1.0',
+        'observation_dim': 128 * 3 + 4,  # vision + proprioception
+        'ready_for_nn': True
+    }
+    
+    save_policy(path, 'NeuralStub', policy.get_params(), config, metadata)
+
+
 if __name__ == "__main__":
-    # Create example checkpoint
+    # Create example checkpoints
     create_example_checkpoint()
+    create_neural_stub_checkpoint()

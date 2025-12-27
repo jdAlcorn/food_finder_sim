@@ -1,0 +1,29 @@
+{
+  "policy_name": "NeuralStub",
+  "policy_params": {
+    "v_scale": 400.0,
+    "omega_scale": 10.0,
+    "default_throttle": 0.3
+  },
+  "sim_config": {
+    "world_width": 800,
+    "world_height": 800,
+    "agent_radius": 12,
+    "agent_max_thrust": 300.0,
+    "agent_max_turn_accel": 8.0,
+    "agent_linear_drag": 2.0,
+    "agent_angular_drag": 5.0,
+    "wall_restitution": 0.6,
+    "food_radius": 8,
+    "fov_degrees": 120,
+    "num_rays": 128,
+    "max_range": 300
+  },
+  "metadata": {
+    "created_by": "neural_stub_generator",
+    "description": "Neural network policy stub with observation extraction",
+    "version": "1.0",
+    "observation_dim": 388,
+    "ready_for_nn": true
+  }
+}
