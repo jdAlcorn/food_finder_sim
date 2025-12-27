@@ -328,20 +328,6 @@ def draw_vision(screen, agent, distances, hit_points, show_vision):
     
     fov_rad = math.radians(FOV_DEGREES)
     
-    # Draw FOV cone outline
-    cone_length = MAX_RANGE * 0.3  # Shorter for visualization
-    left_angle = agent.theta - fov_rad/2
-    right_angle = agent.theta + fov_rad/2
-    
-    left_x = agent.x + cone_length * math.cos(left_angle)
-    left_y = agent.y + cone_length * math.sin(left_angle)
-    right_x = agent.x + cone_length * math.cos(right_angle)
-    right_y = agent.y + cone_length * math.sin(right_angle)
-    
-    # Draw FOV cone lines
-    #pygame.draw.line(screen, YELLOW, (agent.x, agent.y), (left_x, left_y), 1)
-    #pygame.draw.line(screen, YELLOW, (agent.x, agent.y), (right_x, right_y), 1)
-    
     # Draw visible region polygon
     if len(hit_points) > 0:
         # Create polygon vertices: agent position + hit points
@@ -391,6 +377,18 @@ def draw_vision(screen, agent, distances, hit_points, show_vision):
             draw_hit_y = max(0, min(WINDOW_HEIGHT, hit_y))
             pygame.draw.line(screen, color, (agent.x, agent.y), (draw_hit_x, draw_hit_y), 1)
 
+    # Draw FOV cone outline
+    left_angle = agent.theta - fov_rad/2
+    right_angle = agent.theta + fov_rad/2
+    
+    left_x = agent.x + MAX_RANGE * math.cos(left_angle)
+    left_y = agent.y + MAX_RANGE * math.sin(left_angle)
+    right_x = agent.x + MAX_RANGE * math.cos(right_angle)
+    right_y = agent.y + MAX_RANGE * math.sin(right_angle)
+
+    # Draw FOV cone lines
+    pygame.draw.line(screen, YELLOW, (agent.x, agent.y), (left_x, left_y), 1)
+    pygame.draw.line(screen, YELLOW, (agent.x, agent.y), (right_x, right_y), 1)
 
 def draw_ui(screen, font, agent, fps, show_vision):
     # Throttle display
