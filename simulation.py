@@ -5,12 +5,14 @@ Minimal 2D Continuous Simulation
 - Food collection
 - Wall collisions
 - Manual keyboard controls
+- Ray-casting vision system with LiDAR strip visualization
 """
 
 import pygame
 import math
 import random
 import sys
+import numpy as np
 
 # Constants
 WINDOW_WIDTH = 800
@@ -28,6 +30,12 @@ WALL_RESTITUTION = 0.6
 # Food constants
 FOOD_RADIUS = 8
 
+# Vision constants
+FOV_DEGREES = 120
+NUM_RAYS = 128
+MAX_RANGE = 300
+STRIP_HEIGHT = 60
+
 # Colors
 BLACK = (0, 0, 0)
 WHITE = (255, 255, 255)
@@ -35,6 +43,8 @@ BLUE = (50, 150, 255)
 RED = (255, 50, 50)
 GREEN = (50, 255, 50)
 GRAY = (128, 128, 128)
+YELLOW = (255, 255, 0)
+CYAN = (0, 255, 255)
 
 
 class Agent:
@@ -132,6 +142,163 @@ class Food:
         self.y = random.uniform(margin, WINDOW_HEIGHT - margin)
 
 
+# Ray-casting helper functions
+def intersect_ray_circle(origin_x, origin_y, dir_x, dir_y, circle_x, circle_y, radius):
+    """
+    Ray-circle intersection. Returns distance to nearest intersection or None.
+    """
+    # Vector from ray origin to circle center
+    oc_x = origin_x - circle_x
+    oc_y = origin_y - circle_y
+    
+    # Quadratic equation coefficients: at² + bt + c = 0
+    a = dir_x * dir_x + dir_y * dir_y
+    b = 2.0 * (oc_x * dir_x + oc_y * dir_y)
+    c = oc_x * oc_x + oc_y * oc_y - radius * radius
+    
+    discriminant = b * b - 4 * a * c
+    
+    if discriminant < 0:
+        return None  # No intersection
+    
+    sqrt_discriminant = math.sqrt(discriminant)
+    t1 = (-b - sqrt_discriminant) / (2 * a)
+    t2 = (-b + sqrt_discriminant) / (2 * a)
+    
+    # We want the nearest positive intersection
+    if t1 > 0:
+        return t1
+    elif t2 > 0:
+        return t2
+    else:
+        return None  # Circle is behind ray origin
+
+
+def intersect_ray_segment(origin_x, origin_y, dir_x, dir_y, p1_x, p1_y, p2_x, p2_y):
+    """
+    Ray-line segment intersection. Returns distance to intersection or None.
+    """
+    # Line segment vector
+    seg_x = p2_x - p1_x
+    seg_y = p2_y - p1_y
+    
+    # Vector from segment start to ray origin
+    h_x = origin_x - p1_x
+    h_y = origin_y - p1_y
+    
+    # Cross products for 2D
+    a = dir_x * seg_y - dir_y * seg_x
+    
+    if abs(a) < 1e-10:  # Ray parallel to segment
+        return None
+    
+    f = 1.0 / a
+    s = f * (h_x * seg_y - h_y * seg_x)
+    t = f * (dir_x * h_y - dir_y * h_x)
+    
+    if s > 0 and 0 <= t <= 1:  # Ray hits segment
+        return s
+    
+    return None
+
+
+def cast_ray(origin_x, origin_y, dir_x, dir_y, food):
+    """
+    Cast a single ray and find the nearest intersection.
+    Returns (distance, hit_type, hit_color) or (None, None, None) if no hit.
+    """
+    nearest_distance = float('inf')
+    hit_type = None
+    hit_color = None
+    
+    # Check wall intersections (4 segments)
+    walls = [
+        (0, 0, WINDOW_WIDTH, 0),  # Top wall
+        (WINDOW_WIDTH, 0, WINDOW_WIDTH, WINDOW_HEIGHT),  # Right wall
+        (WINDOW_WIDTH, WINDOW_HEIGHT, 0, WINDOW_HEIGHT),  # Bottom wall
+        (0, WINDOW_HEIGHT, 0, 0)  # Left wall
+    ]
+    
+    for p1_x, p1_y, p2_x, p2_y in walls:
+        distance = intersect_ray_segment(origin_x, origin_y, dir_x, dir_y, p1_x, p1_y, p2_x, p2_y)
+        if distance is not None and distance < nearest_distance:
+            nearest_distance = distance
+            hit_type = 'wall'
+            hit_color = WHITE
+    
+    # Check food intersection
+    food_distance = intersect_ray_circle(origin_x, origin_y, dir_x, dir_y, food.x, food.y, FOOD_RADIUS)
+    if food_distance is not None and food_distance < nearest_distance:
+        nearest_distance = food_distance
+        hit_type = 'food'
+        hit_color = RED
+    
+    if nearest_distance == float('inf'):
+        return None, None, None
+    
+    return nearest_distance, hit_type, hit_color
+
+
+def compute_vision(agent, food):
+    """
+    Compute ray-casting vision for the agent.
+    Returns arrays of distances, hit_points, and colors.
+    """
+    fov_rad = math.radians(FOV_DEGREES)
+    angles = np.linspace(-fov_rad/2, fov_rad/2, NUM_RAYS)
+    
+    distances = []
+    hit_points = []
+    colors = []
+    
+    for angle in angles:
+        ray_angle = agent.theta + angle
+        dir_x = math.cos(ray_angle)
+        dir_y = math.sin(ray_angle)
+        
+        distance, hit_type, hit_color = cast_ray(agent.x, agent.y, dir_x, dir_y, food)
+        
+        if distance is not None and distance <= MAX_RANGE:
+            hit_x = agent.x + distance * dir_x
+            hit_y = agent.y + distance * dir_y
+            distances.append(distance)
+            hit_points.append((hit_x, hit_y))
+            colors.append(hit_color)
+        else:
+            distances.append(MAX_RANGE)
+            hit_x = agent.x + MAX_RANGE * dir_x
+            hit_y = agent.y + MAX_RANGE * dir_y
+            hit_points.append((hit_x, hit_y))
+            colors.append(BLACK)
+    
+    return distances, hit_points, colors
+
+
+def build_depth_strip(distances, colors):
+    """
+    Build the 1D depth image strip as a pygame surface.
+    """
+    strip = pygame.Surface((NUM_RAYS, STRIP_HEIGHT))
+    strip.fill(BLACK)
+    
+    for i, (distance, color) in enumerate(zip(distances, colors)):
+        if color != BLACK:  # Hit something
+            # Brightness based on distance (closer = brighter)
+            brightness = max(0.0, 1.0 - distance / MAX_RANGE)
+            
+            # Apply brightness to color
+            bright_color = (
+                int(color[0] * brightness),
+                int(color[1] * brightness),
+                int(color[2] * brightness)
+            )
+            
+            # Fill the column
+            pygame.draw.rect(strip, bright_color, (i, 0, 1, STRIP_HEIGHT))
+    
+    return strip
+
+
 def check_food_collision(agent, food):
     dx = agent.x - food.x
     dy = agent.y - food.y
@@ -154,7 +321,62 @@ def draw_food(screen, food):
     pygame.draw.circle(screen, RED, (int(food.x), int(food.y)), FOOD_RADIUS)
 
 
-def draw_ui(screen, font, agent, fps):
+def draw_vision(screen, agent, distances, hit_points, show_vision):
+    """
+    Draw the FOV cone and ray hits visualization.
+    """
+    if not show_vision:
+        return
+    
+    fov_rad = math.radians(FOV_DEGREES)
+    
+    # Draw FOV cone outline
+    cone_length = MAX_RANGE * 0.3  # Shorter for visualization
+    left_angle = agent.theta - fov_rad/2
+    right_angle = agent.theta + fov_rad/2
+    
+    left_x = agent.x + cone_length * math.cos(left_angle)
+    left_y = agent.y + cone_length * math.sin(left_angle)
+    right_x = agent.x + cone_length * math.cos(right_angle)
+    right_y = agent.y + cone_length * math.sin(right_angle)
+    
+    # Draw FOV cone lines
+    pygame.draw.line(screen, YELLOW, (agent.x, agent.y), (left_x, left_y), 1)
+    pygame.draw.line(screen, YELLOW, (agent.x, agent.y), (right_x, right_y), 1)
+    
+    # Draw visible region polygon
+    if len(hit_points) > 0:
+        # Create polygon vertices: agent position + hit points
+        polygon_points = [(agent.x, agent.y)]
+        for hit_x, hit_y in hit_points:
+            # Clamp to screen bounds for drawing
+            hit_x = max(0, min(WINDOW_WIDTH, hit_x))
+            hit_y = max(0, min(WINDOW_HEIGHT, hit_y))
+            polygon_points.append((hit_x, hit_y))
+        
+        if len(polygon_points) > 2:
+            # Draw semi-transparent filled polygon
+            temp_surface = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT))
+            temp_surface.set_alpha(30)
+            temp_surface.fill(BLACK)
+            pygame.draw.polygon(temp_surface, CYAN, polygon_points)
+            screen.blit(temp_surface, (0, 0))
+            
+            # Draw polygon outline
+            pygame.draw.polygon(screen, CYAN, polygon_points, 1)
+    
+    # Draw hit points
+    for i, ((hit_x, hit_y), distance) in enumerate(zip(hit_points, distances)):
+        if distance < MAX_RANGE:
+            # Hit something - draw bright dot
+            pygame.draw.circle(screen, YELLOW, (int(hit_x), int(hit_y)), 2)
+        
+        # Draw every 8th ray for clarity
+        if i % 8 == 0:
+            pygame.draw.line(screen, (100, 100, 100), (agent.x, agent.y), (hit_x, hit_y), 1)
+
+
+def draw_ui(screen, font, agent, fps, show_vision):
     # Throttle display
     throttle_text = font.render(f"Throttle: {agent.throttle:.2f}", True, WHITE)
     screen.blit(throttle_text, (10, 10))
@@ -167,23 +389,28 @@ def draw_ui(screen, font, agent, fps):
     fps_text = font.render(f"FPS: {fps:.1f}", True, WHITE)
     screen.blit(fps_text, (10, 60))
     
+    # Vision toggle status
+    vision_text = font.render(f"Vision: {'ON' if show_vision else 'OFF'}", True, WHITE)
+    screen.blit(vision_text, (10, 85))
+    
     # Controls
     controls = [
         "Controls:",
         "W/S - Throttle up/down",
         "A/D - Steer left/right",
+        "V - Toggle vision display",
         "ESC - Quit"
     ]
     for i, text in enumerate(controls):
         color = GRAY if i == 0 else WHITE
         control_text = font.render(text, True, color)
-        screen.blit(control_text, (WINDOW_WIDTH - 200, 10 + i * 25))
+        screen.blit(control_text, (WINDOW_WIDTH - 220, 10 + i * 25))
 
 
 def main():
     pygame.init()
     screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
-    pygame.display.set_caption("2D Continuous Simulation")
+    pygame.display.set_caption("2D Continuous Simulation with Ray-Cast Vision")
     clock = pygame.time.Clock()
     font = pygame.font.Font(None, 24)
     
@@ -194,6 +421,7 @@ def main():
     # Game state
     running = True
     food_collected = 0
+    show_vision = True
     
     while running:
         dt = clock.tick(FPS) / 1000.0  # Convert to seconds
@@ -205,6 +433,8 @@ def main():
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     running = False
+                elif event.key == pygame.K_v:
+                    show_vision = not show_vision
         
         # Handle continuous input
         keys = pygame.key.get_pressed()
@@ -233,6 +463,10 @@ def main():
             print(f"FOOD REACHED! Total collected: {food_collected}")
             food.respawn()
         
+        # Compute vision
+        distances, hit_points, colors = compute_vision(agent, food)
+        depth_strip = build_depth_strip(distances, colors)
+        
         # Render
         screen.fill(BLACK)
         
@@ -243,8 +477,25 @@ def main():
         draw_food(screen, food)
         draw_agent(screen, agent)
         
+        # Draw vision system
+        draw_vision(screen, agent, distances, hit_points, show_vision)
+        
+        # Draw depth strip (LiDAR visualization)
+        strip_x = 10
+        strip_y = WINDOW_HEIGHT - STRIP_HEIGHT - 10
+        # Scale up the strip for better visibility
+        scaled_strip = pygame.transform.scale(depth_strip, (NUM_RAYS * 3, STRIP_HEIGHT))
+        screen.blit(scaled_strip, (strip_x, strip_y))
+        
+        # Draw strip border
+        pygame.draw.rect(screen, WHITE, (strip_x - 1, strip_y - 1, NUM_RAYS * 3 + 2, STRIP_HEIGHT + 2), 1)
+        
+        # Strip label
+        strip_label = font.render("LiDAR Depth Strip", True, WHITE)
+        screen.blit(strip_label, (strip_x, strip_y - 25))
+        
         # Draw UI
-        draw_ui(screen, font, agent, clock.get_fps())
+        draw_ui(screen, font, agent, clock.get_fps(), show_vision)
         
         pygame.display.flip()
     
