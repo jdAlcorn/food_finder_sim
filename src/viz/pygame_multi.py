@@ -153,25 +153,92 @@ class MultiSimViewer:
         
         fov_rad = math.radians(sim.config.fov_degrees)
         
-        # Draw every Nth ray to avoid clutter
+        # Calculate all ray angles and hit points
+        angles = [theta + angle for angle in 
+                  [fov_rad * (i / (sim.config.num_rays - 1) - 0.5) for i in range(sim.config.num_rays)]]
+        
+        hit_points = []
+        for distance, angle in zip(distances, angles):
+            hit_x = agent_x + min(distance, sim.config.max_range) * math.cos(angle)
+            hit_y = agent_y + min(distance, sim.config.max_range) * math.sin(angle)
+            hit_points.append((hit_x, hit_y))
+        
+        # Draw semi-transparent filled polygon (visible area)
+        if len(hit_points) > 0:
+            # Create polygon vertices: agent position + hit points
+            polygon_points = [self.world_to_mini(agent_x, agent_y, mini_x, mini_y)]
+            for hit_x, hit_y in hit_points:
+                screen_hit = self.world_to_mini(hit_x, hit_y, mini_x, mini_y)
+                polygon_points.append(screen_hit)
+            
+            if len(polygon_points) > 2:
+                # Create a temporary surface for the mini window
+                temp_surface = pygame.Surface((self.mini_width, self.mini_height))
+                temp_surface.set_alpha(30)
+                temp_surface.fill(BLACK)
+                
+                # Adjust polygon points to be relative to temp surface
+                adjusted_points = []
+                for px, py in polygon_points:
+                    adj_x = px - mini_x
+                    adj_y = py - mini_y
+                    # Clamp to mini window bounds
+                    adj_x = max(0, min(self.mini_width - 1, adj_x))
+                    adj_y = max(0, min(self.mini_height - 1, adj_y))
+                    adjusted_points.append((adj_x, adj_y))
+                
+                # Draw polygon on temp surface
+                if len(adjusted_points) > 2:
+                    pygame.draw.polygon(temp_surface, CYAN, adjusted_points)
+                    # Blit temp surface to main screen
+                    self.screen.blit(temp_surface, (mini_x, mini_y))
+        
+        # Draw hit points and some rays
         ray_skip = max(1, len(distances) // 16)  # Show ~16 rays max
         
         for i in range(0, len(distances), ray_skip):
             distance = distances[i]
-            angle = theta + fov_rad * (i / (len(distances) - 1) - 0.5)
+            hit_type = hit_types[i]
+            angle = angles[i]
             
-            # Calculate ray end point
-            ray_length = min(distance, sim.config.max_range) * 0.3  # Shorter for visibility
-            end_x = agent_x + ray_length * math.cos(angle)
-            end_y = agent_y + ray_length * math.sin(angle)
+            # Calculate actual hit point (not shortened)
+            hit_x = agent_x + min(distance, sim.config.max_range) * math.cos(angle)
+            hit_y = agent_y + min(distance, sim.config.max_range) * math.sin(angle)
             
             # Convert to screen coordinates
-            start_screen = self.world_to_mini(agent_x, agent_y, mini_x, mini_y)
-            end_screen = self.world_to_mini(end_x, end_y, mini_x, mini_y)
+            agent_screen = self.world_to_mini(agent_x, agent_y, mini_x, mini_y)
+            hit_screen = self.world_to_mini(hit_x, hit_y, mini_x, mini_y)
             
-            # Draw ray
+            # Draw ray line
             color = (100, 100, 100) if distance >= sim.config.max_range else (150, 150, 150)
-            pygame.draw.line(self.screen, color, start_screen, end_screen, 1)
+            pygame.draw.line(self.screen, color, agent_screen, hit_screen, 1)
+            
+            # Draw hit point if it hit something
+            if distance < sim.config.max_range:
+                hit_color = YELLOW  # Default
+                if hit_type == 'food':
+                    hit_color = RED
+                elif hit_type == 'wall':
+                    hit_color = WHITE
+                
+                pygame.draw.circle(self.screen, hit_color, hit_screen, 1)
+        
+        # Draw FOV cone outline (at the end, like single viewer)
+        cone_length = sim.config.max_range  # Full range like single viewer
+        left_angle = theta - fov_rad/2
+        right_angle = theta + fov_rad/2
+        
+        left_x = agent_x + cone_length * math.cos(left_angle)
+        left_y = agent_y + cone_length * math.sin(left_angle)
+        right_x = agent_x + cone_length * math.cos(right_angle)
+        right_y = agent_y + cone_length * math.sin(right_angle)
+        
+        agent_screen = self.world_to_mini(agent_x, agent_y, mini_x, mini_y)
+        left_screen = self.world_to_mini(left_x, left_y, mini_x, mini_y)
+        right_screen = self.world_to_mini(right_x, right_y, mini_x, mini_y)
+        
+        pygame.draw.line(self.screen, YELLOW, agent_screen, left_screen, 1)
+        pygame.draw.line(self.screen, YELLOW, agent_screen, right_screen, 1)
     
     def draw_global_stats(self):
         """Draw global statistics"""
