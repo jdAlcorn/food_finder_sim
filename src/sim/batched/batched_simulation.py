@@ -321,25 +321,29 @@ class BatchedSimulation:
             'speed': np.sqrt(self.agent_vx**2 + self.agent_vy**2)
         }
     
-    def get_observations(self, v_scale: float = 400.0, omega_scale: float = 10.0) -> np.ndarray:
+    def get_observations(self, v_scale: float = 400.0, omega_scale: float = 10.0, 
+                        profiler=None) -> np.ndarray:
         """
         Get neural network observations for all environments
         
         Args:
             v_scale: Velocity normalization scale
             omega_scale: Angular velocity normalization scale
+            profiler: Optional profiler for timing measurements
             
         Returns:
             Observation batch [B, 388]
         """
-        # Compute vision
+        # Compute vision (this is the expensive part)
+        profiler and profiler.start_timer('vision_raycast')
         distances, materials = self._compute_vision_batch()
+        profiler and profiler.end_timer('vision_raycast')
         
-        # Get agent states
+        # Get agent states and build observations (feature extraction)
+        profiler and profiler.start_timer('obs_build')
         agent_states = self._get_agent_states()
-        
-        # Build observations
         observations = build_obs_batch(agent_states, distances, materials, v_scale, omega_scale)
+        profiler and profiler.end_timer('obs_build')
         
         return observations
     

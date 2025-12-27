@@ -94,6 +94,16 @@ def parse_args():
     parser.add_argument('--eval-batch-size', type=int, default=None,
                        help='Batch size for batched evaluation (default: same as eval-seeds)')
     
+    # Profiling parameters
+    parser.add_argument('--profile-one-candidate-per-gen', action='store_true', default=False,
+                       help='Enable lightweight profiling of one candidate per generation')
+    parser.add_argument('--profile-candidate-idx', type=int, default=0,
+                       help='Which candidate index to profile (default: 0)')
+    parser.add_argument('--profile-max-steps', type=int, default=500,
+                       help='Maximum steps to profile per candidate (default: 500)')
+    parser.add_argument('--profile-print-every-gen', type=int, default=1,
+                       help='Print profile every N generations (default: 1)')
+    
     return parser.parse_args()
 
 
@@ -160,7 +170,11 @@ def initialize_training(args) -> tuple:
         antithetic=args.antithetic,
         fitness_kwargs={
             'food_reward_multiplier': args.food_reward,
-            'proximity_reward_scale': args.proximity_reward_scale
+            'proximity_reward_scale': args.proximity_reward_scale,
+            'profile_enabled': args.profile_one_candidate_per_gen,
+            'profile_candidate_idx': args.profile_candidate_idx,
+            'profile_max_steps': args.profile_max_steps,
+            'profile_print_every_gen': args.profile_print_every_gen
         },
         use_batched_eval=args.use_batched_eval,
         eval_batch_size=args.eval_batch_size

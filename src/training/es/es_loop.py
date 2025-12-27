@@ -193,7 +193,8 @@ class EvolutionStrategiesTrainer:
                 self.eval_seeds_per_candidate,
                 self.T,
                 self.dt,
-                self.fitness_kwargs  # Pass fitness parameters
+                self.fitness_kwargs,  # Pass fitness parameters
+                iteration  # Add generation number for profiling
             )
             worker_args.append(args)
         
