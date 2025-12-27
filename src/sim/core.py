@@ -35,6 +35,32 @@ class SimulationConfig:
         self.fov_degrees = 120
         self.num_rays = 128
         self.max_range = 300
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert config to dictionary for serialization"""
+        return {
+            'world_width': self.world_width,
+            'world_height': self.world_height,
+            'agent_radius': self.agent_radius,
+            'agent_max_thrust': self.agent_max_thrust,
+            'agent_max_turn_accel': self.agent_max_turn_accel,
+            'agent_linear_drag': self.agent_linear_drag,
+            'agent_angular_drag': self.agent_angular_drag,
+            'wall_restitution': self.wall_restitution,
+            'food_radius': self.food_radius,
+            'fov_degrees': self.fov_degrees,
+            'num_rays': self.num_rays,
+            'max_range': self.max_range
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'SimulationConfig':
+        """Create config from dictionary"""
+        config = cls()
+        for key, value in data.items():
+            if hasattr(config, key):
+                setattr(config, key, value)
+        return config
 
 
 class Agent:
@@ -50,8 +76,11 @@ class Agent:
         self.throttle = 0.0  # 0 to 1
         self.config = config
         
-    def update(self, dt: float, steer_input: float, throttle_input: float):
-        """Update agent physics"""
+    def update(self, dt: float, action: Dict[str, float]):
+        """Update agent physics with action dict"""
+        steer_input = action.get('steer', 0.0)
+        throttle_input = action.get('throttle', 0.0)
+        
         # Direct throttle control
         self.throttle = max(0.0, throttle_input)
         
@@ -300,10 +329,10 @@ class Simulation:
         distance = math.sqrt(dx * dx + dy * dy)
         return distance <= (self.config.agent_radius + self.config.food_radius)
     
-    def step(self, dt: float, steer_input: float, throttle_input: float) -> Dict[str, Any]:
-        """Single simulation step"""
+    def step(self, dt: float, action: Dict[str, float]) -> Dict[str, Any]:
+        """Single simulation step with action dict"""
         # Update agent
-        self.agent.update(dt, steer_input, throttle_input)
+        self.agent.update(dt, action)
         self.agent.handle_wall_collisions()
         
         # Check food collision

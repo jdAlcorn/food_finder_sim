@@ -1,0 +1,26 @@
+{
+  "policy_name": "Scripted",
+  "policy_params": {
+    "seek_strength": 1.5,
+    "throttle_level": 0.9
+  },
+  "sim_config": {
+    "world_width": 800,
+    "world_height": 800,
+    "agent_radius": 12,
+    "agent_max_thrust": 300.0,
+    "agent_max_turn_accel": 8.0,
+    "agent_linear_drag": 2.0,
+    "agent_angular_drag": 5.0,
+    "wall_restitution": 0.6,
+    "food_radius": 8,
+    "fov_degrees": 120,
+    "num_rays": 128,
+    "max_range": 300
+  },
+  "metadata": {
+    "created_by": "example_generator",
+    "description": "Simple food-seeking scripted policy",
+    "version": "1.0"
+  }
+}

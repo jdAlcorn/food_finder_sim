@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
 Interactive GUI version of the 2D simulation
-Uses simulation_core.py for all physics/logic
+Uses src.sim.core for all physics/logic
 """
 
 import pygame
 import math
 import sys
-from simulation_core import Simulation, SimulationConfig
+from typing import Protocol
+from src.sim.core import Simulation, SimulationConfig
 
 # Colors
 BLACK = (0, 0, 0)
@@ -27,7 +28,16 @@ WALL_COLORS = [
     (255, 165, 0)     # Left wall - Orange
 ]
 
-FPS = 60
+
+class PolicyProtocol(Protocol):
+    """Protocol for policy/controller interface"""
+    def reset(self) -> None:
+        """Reset policy state (optional)"""
+        ...
+    
+    def act(self, sim_state: dict) -> dict:
+        """Get action from current simulation state"""
+        ...
 
 
 def build_depth_strip(distances, hit_types, hit_wall_ids, config):
@@ -158,7 +168,6 @@ def draw_vision(screen, sim, show_vision):
             draw_hit_x = max(0, min(sim.config.world_width, hit_x))
             draw_hit_y = max(0, min(sim.config.world_height, hit_y))
             pygame.draw.line(screen, color, (agent_x, agent_y), (draw_hit_x, draw_hit_y), 1)
-
     # Draw FOV cone outline
     cone_length = sim.config.max_range
     left_angle = theta - fov_rad/2
@@ -173,7 +182,7 @@ def draw_vision(screen, sim, show_vision):
     pygame.draw.line(screen, YELLOW, (agent_x, agent_y), (left_x, left_y), 1)
     pygame.draw.line(screen, YELLOW, (agent_x, agent_y), (right_x, right_y), 1)
 
-def draw_ui(screen, font, sim, fps, show_vision):
+def draw_ui(screen, font, sim, fps, show_vision, policy_name="Unknown"):
     """Draw UI information"""
     agent_state = sim.agent.get_state()
     
@@ -200,25 +209,35 @@ def draw_ui(screen, font, sim, fps, show_vision):
     food_text = font.render(f"Food collected: {sim.food_collected}", True, WHITE)
     screen.blit(food_text, (10, 160))
     
+    policy_text = font.render(f"Policy: {policy_name}", True, WHITE)
+    screen.blit(policy_text, (10, 185))
+    
     # Controls
     controls = [
         "Controls:",
-        "W - Forward thrust (hold)",
-        "A/D - Steer left/right",
         "V - Toggle vision display",
         "ESC - Quit"
     ]
+    if policy_name == "Manual":
+        controls.extend([
+            "W - Forward thrust (hold)",
+            "A/D - Steer left/right"
+        ])
+    
     for i, text in enumerate(controls):
         color = GRAY if i == 0 else WHITE
         control_text = font.render(text, True, color)
         screen.blit(control_text, (sim.config.world_width - 220, 10 + i * 25))
 
 
-def main():
+def run_simulation_gui(policy: PolicyProtocol, config: SimulationConfig = None, 
+                      fps: int = 60, policy_name: str = "Unknown"):
+    """Run the pygame GUI with given policy"""
     pygame.init()
     
     # Create simulation
-    config = SimulationConfig()
+    if config is None:
+        config = SimulationConfig()
     sim = Simulation(config)
     
     screen = pygame.display.set_mode((config.world_width, config.world_height))
@@ -230,8 +249,11 @@ def main():
     running = True
     show_vision = True
     
+    # Reset policy
+    policy.reset()
+    
     while running:
-        dt = clock.tick(FPS) / 1000.0  # Convert to seconds
+        dt = clock.tick(fps) / 1000.0  # Convert to seconds
         
         # Handle events
         for event in pygame.event.get():
@@ -243,21 +265,12 @@ def main():
                 elif event.key == pygame.K_v:
                     show_vision = not show_vision
         
-        # Handle continuous input
-        keys = pygame.key.get_pressed()
-        
-        # Throttle input
-        throttle_input = 1.0 if keys[pygame.K_w] else 0.0
-        
-        # Steering input
-        steer_input = 0.0
-        if keys[pygame.K_a]:
-            steer_input = -1.0
-        elif keys[pygame.K_d]:
-            steer_input = 1.0
+        # Get action from policy
+        sim_state = sim.get_state()
+        action = policy.act(sim_state)
         
         # Update simulation
-        step_info = sim.step(dt, steer_input, throttle_input)
+        step_info = sim.step(dt, action)
         
         # Print food collection
         if step_info['food_collected_this_step']:
@@ -295,13 +308,15 @@ def main():
         screen.blit(strip_label, (strip_x, strip_y - 25))
         
         # Draw UI
-        draw_ui(screen, font, sim, clock.get_fps(), show_vision)
+        draw_ui(screen, font, sim, clock.get_fps(), show_vision, policy_name)
         
         pygame.display.flip()
     
     pygame.quit()
-    sys.exit()
 
 
 if __name__ == "__main__":
-    main()
+    # Default to manual policy if run directly
+    from src.policy.manual import ManualPolicy
+    policy = ManualPolicy()
+    run_simulation_gui(policy, policy_name="Manual")
