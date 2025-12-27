@@ -22,7 +22,7 @@ class EvolutionStrategiesTrainer:
                  sim_config: SimulationConfig, pop_size: int = 128, sigma: float = 0.02,
                  alpha: float = 0.01, T: int = 600, dt: float = 1/60, seed0: int = 42,
                  num_workers: int = None, eval_seeds_per_candidate: int = 1, 
-                 antithetic: bool = True):
+                 antithetic: bool = True, fitness_kwargs: Dict[str, Any] = None):
         """
         Initialize ES trainer
         
@@ -39,6 +39,7 @@ class EvolutionStrategiesTrainer:
             num_workers: Number of worker processes (default: cpu_count//2)
             eval_seeds_per_candidate: Number of seeds to evaluate per candidate
             antithetic: Whether to use antithetic sampling
+            fitness_kwargs: Additional arguments for fitness function
         """
         self.model_ctor = model_ctor
         self.model_kwargs = model_kwargs
@@ -51,6 +52,7 @@ class EvolutionStrategiesTrainer:
         self.seed0 = seed0
         self.eval_seeds_per_candidate = eval_seeds_per_candidate
         self.antithetic = antithetic
+        self.fitness_kwargs = fitness_kwargs or {}
         
         # Set up multiprocessing
         if num_workers is None:
@@ -171,7 +173,7 @@ class EvolutionStrategiesTrainer:
                 self.eval_seeds_per_candidate,
                 self.T,
                 self.dt,
-                {}  # Additional kwargs for rollout_fitness
+                self.fitness_kwargs  # Pass fitness parameters
             )
             worker_args.append(args)
         

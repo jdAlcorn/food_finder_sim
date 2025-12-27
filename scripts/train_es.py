@@ -54,6 +54,12 @@ def parse_args():
     parser.add_argument('--omega-scale', type=float, default=10.0,
                        help='Angular velocity normalization scale (default: 10.0)')
     
+    # Fitness parameters
+    parser.add_argument('--food-reward', type=float, default=1000.0,
+                       help='Points awarded per food collected (default: 1000.0)')
+    parser.add_argument('--proximity-reward-scale', type=float, default=1.0,
+                       help='Scale factor for proximity reward (default: 1.0)')
+    
     # System parameters
     parser.add_argument('--workers', type=int, default=None,
                        help='Number of worker processes (default: cpu_count//2)')
@@ -145,7 +151,11 @@ def initialize_training(args) -> tuple:
         seed0=args.seed,
         num_workers=args.workers,
         eval_seeds_per_candidate=args.eval_seeds,
-        antithetic=args.antithetic
+        antithetic=args.antithetic,
+        fitness_kwargs={
+            'food_reward_multiplier': args.food_reward,
+            'proximity_reward_scale': args.proximity_reward_scale
+        }
     )
     
     return trainer, theta, start_generation, best_fitness_so_far, sim_config, model_ctor, model_kwargs

@@ -16,7 +16,8 @@ from .params import set_flat_params
 def rollout_fitness(theta_flat: torch.Tensor, model_ctor: Callable, model_kwargs: Dict[str, Any],
                    sim_config: SimulationConfig, seed: int, T: int, dt: float, 
                    max_range: float = 300.0, v_scale: float = 400.0, 
-                   omega_scale: float = 10.0) -> float:
+                   omega_scale: float = 10.0, food_reward_multiplier: float = 1000.0,
+                   proximity_reward_scale: float = 1.0) -> float:
     """
     Evaluate fitness of a parameter vector through simulation rollout
     
@@ -31,6 +32,8 @@ def rollout_fitness(theta_flat: torch.Tensor, model_ctor: Callable, model_kwargs
         max_range: Maximum vision range for fitness calculation
         v_scale: Velocity normalization scale
         omega_scale: Angular velocity normalization scale
+        food_reward_multiplier: Points awarded per food collected
+        proximity_reward_scale: Scale factor for proximity reward
         
     Returns:
         Fitness value (higher is better)
@@ -48,7 +51,7 @@ def rollout_fitness(theta_flat: torch.Tensor, model_ctor: Callable, model_kwargs
         
         # Track fitness components
         distances_to_food = []
-        food_reached = False
+        food_count = 0
         
         # Run episode
         with torch.no_grad():
@@ -75,25 +78,25 @@ def rollout_fitness(theta_flat: torch.Tensor, model_ctor: Callable, model_kwargs
                 action = {'steer': steer, 'throttle': throttle}
                 step_info = sim.step(dt, action)
                 
-                # Track distance to food
+                # Track distance to food (current food position)
                 agent_pos = (step_info['agent_state']['x'], step_info['agent_state']['y'])
                 food_pos = (step_info['food_position']['x'], step_info['food_position']['y'])
                 dist_to_food = math.sqrt((agent_pos[0] - food_pos[0])**2 + (agent_pos[1] - food_pos[1])**2)
                 distances_to_food.append(dist_to_food)
                 
-                # Check if food was reached
+                # Count food collected
                 if step_info['food_collected_this_step']:
-                    food_reached = True
+                    food_count += 1
         
-        # Calculate fitness
-        best_distance = min(distances_to_food) if distances_to_food else max_range
+        # Calculate fitness components
+        final_distance = distances_to_food[-1] if distances_to_food else max_range
         
-        # Fitness components
-        reached_bonus = 1000.0 if food_reached else 0.0
-        distance_reward = max_range - best_distance  # Higher reward for getting closer
+        # Fitness components (food count heavily weighted)
+        food_reward = food_count * food_reward_multiplier  # Points per food collected
+        proximity_reward = max(0, max_range - final_distance) * proximity_reward_scale  # Reward for being close at end
         step_penalty = -0.001 * T  # Small penalty for episode length
         
-        fitness = reached_bonus + distance_reward + step_penalty
+        fitness = food_reward + proximity_reward + step_penalty
         
         return float(fitness)
         
