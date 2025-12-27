@@ -183,8 +183,10 @@ def intersect_ray_segment(origin_x, origin_y, dir_x, dir_y, p1_x, p1_y, p2_x, p2
     seg_y = p2_y - p1_y
     
     # Vector from segment start to ray origin
-    h_x = origin_x - p1_x
-    h_y = origin_y - p1_y
+    #h_x = origin_x - p1_x
+    #h_y = origin_y - p1_y
+    h_x = p1_x - origin_x
+    h_y = p1_y - origin_y
     
     # Cross products for 2D
     a = dir_x * seg_y - dir_y * seg_x
@@ -194,9 +196,11 @@ def intersect_ray_segment(origin_x, origin_y, dir_x, dir_y, p1_x, p1_y, p2_x, p2
     
     f = 1.0 / a
     s = f * (h_x * seg_y - h_y * seg_x)
-    t = f * (dir_x * h_y - dir_y * h_x)
+    #t = f * (dir_x * h_y - dir_y * h_x)
+    t = f * (h_x * dir_y - h_y * dir_x)
     
-    if s > 0 and 0 <= t <= 1:  # Ray hits segment
+    # More robust checks: s must be positive (forward ray) and t must be in [0,1] (on segment)
+    if s > 1e-6 and 0 <= t <= 1:  # Small epsilon to avoid numerical issues
         return s
     
     return None
@@ -211,24 +215,24 @@ def cast_ray(origin_x, origin_y, dir_x, dir_y, food):
     hit_type = None
     hit_color = None
     
-    # Check wall intersections (4 segments)
+    # Check wall intersections (4 segments) with different colors for debugging
     walls = [
-        (0, 0, WINDOW_WIDTH, 0),  # Top wall
-        (WINDOW_WIDTH, 0, WINDOW_WIDTH, WINDOW_HEIGHT),  # Right wall
-        (WINDOW_WIDTH, WINDOW_HEIGHT, 0, WINDOW_HEIGHT),  # Bottom wall
-        (0, WINDOW_HEIGHT, 0, 0)  # Left wall
+        (0, 0, WINDOW_WIDTH, 0, (255, 100, 100)),  # Top wall - Red
+        (WINDOW_WIDTH, 0, WINDOW_WIDTH, WINDOW_HEIGHT, (100, 255, 100)),  # Right wall - Green
+        (WINDOW_WIDTH, WINDOW_HEIGHT, 0, WINDOW_HEIGHT, (100, 100, 255)),  # Bottom wall - Blue
+        (0, WINDOW_HEIGHT, 0, 0, (255, 255, 100))  # Left wall - Yellow
     ]
     
-    for p1_x, p1_y, p2_x, p2_y in walls:
+    for wall_idx, (p1_x, p1_y, p2_x, p2_y, wall_color) in enumerate(walls):
         distance = intersect_ray_segment(origin_x, origin_y, dir_x, dir_y, p1_x, p1_y, p2_x, p2_y)
-        if distance is not None and distance < nearest_distance:
+        if distance is not None and distance < nearest_distance and distance > 1e-6:
             nearest_distance = distance
-            hit_type = 'wall'
-            hit_color = WHITE
+            hit_type = f'wall_{wall_idx}'
+            hit_color = wall_color
     
     # Check food intersection
     food_distance = intersect_ray_circle(origin_x, origin_y, dir_x, dir_y, food.x, food.y, FOOD_RADIUS)
-    if food_distance is not None and food_distance < nearest_distance:
+    if food_distance is not None and food_distance < nearest_distance and food_distance > 1e-6:
         nearest_distance = food_distance
         hit_type = 'food'
         hit_color = RED
@@ -365,15 +369,33 @@ def draw_vision(screen, agent, distances, hit_points, show_vision):
             # Draw polygon outline
             pygame.draw.polygon(screen, CYAN, polygon_points, 1)
     
-    # Draw hit points
+    # Draw hit points with debugging info
     for i, ((hit_x, hit_y), distance) in enumerate(zip(hit_points, distances)):
         if distance < MAX_RANGE:
-            # Hit something - draw bright dot
-            pygame.draw.circle(screen, YELLOW, (int(hit_x), int(hit_y)), 2)
+            # Check if hit point is outside the visible window bounds
+            outside_bounds = (hit_x < -5 or hit_x > WINDOW_WIDTH + 5 or hit_y < -5 or hit_y > WINDOW_HEIGHT + 5)
+            
+            if outside_bounds:
+                # Draw red circle for hits outside bounds - this might be the bug!
+                pygame.draw.circle(screen, (255, 0, 0), (int(max(0, min(WINDOW_WIDTH, hit_x))), int(max(0, min(WINDOW_HEIGHT, hit_y)))), 4)
+                # Print debug info for the first few out-of-bounds hits
+                if i < 5:
+                    print(f"Ray {i}: Hit at ({hit_x:.1f}, {hit_y:.1f}), distance {distance:.1f} - OUTSIDE BOUNDS")
+            else:
+                pygame.draw.circle(screen, YELLOW, (int(hit_x), int(hit_y)), 2)
         
-        # Draw every 8th ray for clarity
+        # Draw every 8th ray for clarity, with different colors for debugging
         if i % 8 == 0:
-            pygame.draw.line(screen, (100, 100, 100), (agent.x, agent.y), (hit_x, hit_y), 1)
+            color = (100, 100, 100)
+            if distance < MAX_RANGE:
+                outside_bounds = (hit_x < -5 or hit_x > WINDOW_WIDTH + 5 or hit_y < -5 or hit_y > WINDOW_HEIGHT + 5)
+                if outside_bounds:
+                    color = (255, 100, 100)  # Red for out-of-bounds hits
+            
+            # Clamp ray endpoint for drawing
+            draw_hit_x = max(0, min(WINDOW_WIDTH, hit_x))
+            draw_hit_y = max(0, min(WINDOW_HEIGHT, hit_y))
+            pygame.draw.line(screen, color, (agent.x, agent.y), (draw_hit_x, draw_hit_y), 1)
 
 
 def draw_ui(screen, font, agent, fps, show_vision):
@@ -389,9 +411,17 @@ def draw_ui(screen, font, agent, fps, show_vision):
     fps_text = font.render(f"FPS: {fps:.1f}", True, WHITE)
     screen.blit(fps_text, (10, 60))
     
+    # Agent position and heading
+    pos_text = font.render(f"Position: ({agent.x:.1f}, {agent.y:.1f})", True, WHITE)
+    screen.blit(pos_text, (10, 85))
+    
+    heading_degrees = math.degrees(agent.theta)
+    heading_text = font.render(f"Heading: {heading_degrees:.1f}°", True, WHITE)
+    screen.blit(heading_text, (10, 110))
+    
     # Vision toggle status
     vision_text = font.render(f"Vision: {'ON' if show_vision else 'OFF'}", True, WHITE)
-    screen.blit(vision_text, (10, 85))
+    screen.blit(vision_text, (10, 135))
     
     # Controls
     controls = [
