@@ -10,6 +10,7 @@ import torch
 from typing import Dict, Any, Optional, Tuple
 from .base import Policy
 from .models.mlp import SimpleMLP
+from .obs import build_observation
 
 
 class TorchMLPPolicy(Policy):
@@ -73,105 +74,6 @@ class TorchMLPPolicy(Policy):
         self.last_action = None
         self.obs_logged = False
     
-    def _extract_vision_features(self, vision_distances: list, vision_hit_types: list, 
-                                max_range: float) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Extract vision features from raw vision data (reused from stub)"""
-        num_rays = len(vision_distances)
-        self.num_rays = num_rays
-        
-        vision_close = np.zeros(num_rays, dtype=np.float32)
-        vision_food = np.zeros(num_rays, dtype=np.float32)
-        vision_wall = np.zeros(num_rays, dtype=np.float32)
-        
-        for i in range(num_rays):
-            distance = vision_distances[i]
-            hit_type = vision_hit_types[i]
-            
-            if distance is None:
-                distance = max_range
-            
-            vision_close[i] = 1.0 - np.clip(distance / max_range, 0.0, 1.0)
-            
-            if hit_type == 'food':
-                vision_food[i] = 1.0
-            
-            if hit_type is not None and (hit_type == 'wall' or hit_type.startswith('wall')):
-                vision_wall[i] = 1.0
-        
-        return vision_close, vision_food, vision_wall
-    
-    def _extract_proprioception(self, agent_state: Dict[str, float]) -> np.ndarray:
-        """Extract proprioceptive features (reused from stub)"""
-        vx = agent_state['vx']
-        vy = agent_state['vy']
-        theta = agent_state['theta']
-        omega = agent_state['omega']
-        throttle = agent_state['throttle']
-        
-        # Agent's local coordinate frame
-        forward_x = math.cos(theta)
-        forward_y = math.sin(theta)
-        right_x = -math.sin(theta)
-        right_y = math.cos(theta)
-        
-        # Project velocity onto local frame
-        v_forward = vx * forward_x + vy * forward_y
-        v_sideways = vx * right_x + vy * right_y
-        
-        # Normalize and clamp
-        v_forward_norm = np.clip(v_forward / self.v_scale, -2.0, 2.0)
-        v_sideways_norm = np.clip(v_sideways / self.v_scale, -2.0, 2.0)
-        omega_norm = np.clip(omega / self.omega_scale, -2.0, 2.0)
-        throttle_norm = np.clip(throttle, 0.0, 1.0)
-        
-        return np.array([v_forward_norm, v_sideways_norm, omega_norm, throttle_norm], 
-                       dtype=np.float32)
-    
-    def _build_observation(self, sim_state: Dict[str, Any]) -> np.ndarray:
-        """Build complete egocentric observation vector (reused from stub)"""
-        vision_distances = sim_state['vision_distances']
-        vision_hit_types = sim_state['vision_hit_types']
-        agent_state = sim_state['agent_state']
-        
-        # Infer max range
-        max_range = 300.0
-        if len(vision_distances) > 0:
-            max_distances = [d for d in vision_distances if d is not None]
-            if max_distances:
-                potential_max = max(max_distances)
-                if potential_max >= 250:
-                    max_range = potential_max
-        
-        # Extract features
-        vision_close, vision_food, vision_wall = self._extract_vision_features(
-            vision_distances, vision_hit_types, max_range
-        )
-        proprioception = self._extract_proprioception(agent_state)
-        
-        # Concatenate
-        observation = np.concatenate([
-            vision_close,
-            vision_food,
-            vision_wall,
-            proprioception
-        ])
-        
-        # Validate
-        expected_length = self.num_rays * self.vision_channels + self.proprioception_dim
-        assert len(observation) == expected_length, f"Observation length mismatch: {len(observation)} != {expected_length}"
-        assert not np.any(np.isnan(observation)), "Observation contains NaN values"
-        assert not np.any(np.isinf(observation)), "Observation contains infinite values"
-        
-        return observation
-    
-    def get_last_obs(self) -> Optional[np.ndarray]:
-        """Get last observation for debugging"""
-        return self.last_obs
-    
-    def get_last_action(self) -> Optional[Dict[str, float]]:
-        """Get last action for debugging"""
-        return self.last_action
-    
     def act(self, sim_state: Dict[str, Any]) -> Dict[str, float]:
         """
         Extract observation and predict action using neural network
@@ -182,8 +84,8 @@ class TorchMLPPolicy(Policy):
         Returns:
             Action dictionary with steer and throttle
         """
-        # Build observation
-        observation = self._build_observation(sim_state)
+        # Build observation using shared function
+        observation = build_observation(sim_state, self.v_scale, self.omega_scale)
         self.last_obs = observation
         
         # Log observation info once
