@@ -76,19 +76,26 @@ class TorchGRUPolicy(Policy):
             Dict with 'steer' and 'throttle' keys
         """
         # Extract observation from sim_state (similar to other policies)
-        from ..policy.obs import build_observation
+        try:
+            from src.policy.obs import build_observation
+        except ImportError:
+            from ..policy.obs import build_observation
         observation = build_observation(sim_state, self.v_scale, self.omega_scale)
         
         # Use predict method
         return self.predict(observation)
     
-    def reset(self, batch_size: int = 1):
+    def reset(self, batch_size: int = None) -> None:
         """
         Reset hidden state for new episode(s)
+        Compatible with base Policy.reset() interface
         
         Args:
-            batch_size: Number of parallel environments
+            batch_size: Number of parallel environments (default: 1 for single env)
         """
+        if batch_size is None:
+            batch_size = 1  # Default for single environment (viewer, etc.)
+        
         self.wrapper.reset_hidden(batch_size)
         self.last_obs = None
         self.last_action = None
@@ -173,13 +180,19 @@ class TorchGRUPolicy(Policy):
     
     def set_weights(self, weights: np.ndarray):
         """Set model weights from flattened array (for ES compatibility)"""
-        from ..training.es.params import set_flat_params
+        try:
+            from src.training.es.params import set_flat_params
+        except ImportError:
+            from ..training.es.params import set_flat_params
         weight_tensor = torch.tensor(weights, dtype=torch.float32)
         set_flat_params(self.model, weight_tensor)
     
     def get_weights(self) -> np.ndarray:
         """Get model weights as flattened array (for ES compatibility)"""
-        from ..training.es.params import get_flat_params
+        try:
+            from src.training.es.params import get_flat_params
+        except ImportError:
+            from ..training.es.params import get_flat_params
         return get_flat_params(self.model).numpy()
     
     def save_weights(self, path: str):
