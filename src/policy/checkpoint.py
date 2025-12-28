@@ -12,6 +12,7 @@ from .manual import ManualPolicy
 from .scripted import ScriptedPolicy
 from .nn_policy_stub import NeuralPolicyStub
 from .nn_torch_mlp import TorchMLPPolicy
+from .nn_torch_gru import TorchGRUPolicy
 from src.sim.core import SimulationConfig
 
 
@@ -31,7 +32,7 @@ def save_policy(path: str, policy_name: str, policy_params: Dict[str, Any],
     """
     # Handle weights path for torch policies
     weights_path = None
-    if policy_name == 'TorchMLP' and policy_instance is not None:
+    if policy_name in ['TorchMLP', 'TorchGRU'] and policy_instance is not None:
         # Generate weights path
         base_path = os.path.splitext(path)[0]
         weights_path = f"{base_path}_weights.pt"
@@ -94,6 +95,15 @@ def load_policy(path: str) -> Tuple[Policy, SimulationConfig, Dict[str, Any]]:
         policy = NeuralPolicyStub.from_params(policy_params)
     elif policy_name == 'TorchMLP':
         policy = TorchMLPPolicy.from_params(policy_params)
+        
+        # Load weights if available
+        weights_path = policy_params.get('weights_path')
+        if weights_path and os.path.exists(weights_path):
+            policy.load_weights(weights_path)
+        else:
+            print(f"Warning: Weights file not found at {weights_path}, using random initialization")
+    elif policy_name == 'TorchGRU':
+        policy = TorchGRUPolicy.from_params(policy_params)
         
         # Load weights if available
         weights_path = policy_params.get('weights_path')

@@ -136,6 +136,7 @@ def _evaluate_test_case_batch(
 ) -> Tuple[List[float], List[bool], Dict[str, Any]]:
     """
     Evaluate a batch of test cases with dense progress-based fitness
+    Supports both feedforward (MLP) and recurrent (GRU) models
     
     Args:
         fail_weight: Weight for progress score on failed test cases (default: 0.20)
@@ -143,6 +144,14 @@ def _evaluate_test_case_batch(
     Returns:
         Tuple of (scores, reached_flags, diagnostics)
     """
+    # Check if model is recurrent (has init_hidden method)
+    is_recurrent = hasattr(model, 'init_hidden')
+    hidden_state = None
+    
+    if is_recurrent:
+        # Initialize hidden state for recurrent model
+        hidden_state = model.init_hidden(batch_size, device=torch.device(device))
+    
     # Create batched simulation with world support
     batched_sim, updated_sim_config = setup_simulation_with_worlds(test_cases, sim_config)
     
@@ -216,7 +225,14 @@ def _evaluate_test_case_batch(
             if device != "cpu" and torch.cuda.is_available():
                 obs_tensor = obs_tensor.to(device)
             
-            steer_raw, throttle_raw = model(obs_tensor)
+            if is_recurrent:
+                # Recurrent model: forward pass with hidden state
+                steer_raw, throttle_raw, hidden_state = model(obs_tensor, hidden_state)
+                # Detach hidden state to prevent gradient accumulation
+                hidden_state = hidden_state.detach()
+            else:
+                # Feedforward model: standard forward pass
+                steer_raw, throttle_raw = model(obs_tensor)
             
             # Move back to CPU for simulation
             steer = steer_raw.detach().cpu().numpy()

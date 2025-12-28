@@ -314,7 +314,21 @@ def rollout_fitness_batched(theta_flat: torch.Tensor, model_ctor: Callable, mode
                 # Convert to tensor and run model (batched forward pass)
                 profiler and profiler.start_timer('policy_forward')
                 obs_tensor = torch.tensor(observations, dtype=torch.float32)
-                steer_raw, throttle_raw = model(obs_tensor)
+                
+                # Check if model is recurrent (has init_hidden method)
+                if hasattr(model, 'init_hidden'):
+                    # Initialize hidden state on first step
+                    if step == 0:
+                        hidden_state = model.init_hidden(batch_size)
+                    
+                    # Recurrent model: forward pass with hidden state
+                    steer_raw, throttle_raw, hidden_state = model(obs_tensor, hidden_state)
+                    # Detach hidden state to prevent gradient accumulation
+                    hidden_state = hidden_state.detach()
+                else:
+                    # Feedforward model: standard forward pass
+                    steer_raw, throttle_raw = model(obs_tensor)
+                
                 profiler and profiler.end_timer('policy_forward')
                 
                 # Extract actions (activations already applied in model)

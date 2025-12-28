@@ -19,7 +19,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from src.sim.core import SimulationConfig
 from src.policy.models.mlp import SimpleMLP
+from src.policy.models.gru import RecurrentGRUPolicy
 from src.policy.nn_torch_mlp import TorchMLPPolicy
+from src.policy.nn_torch_gru import TorchGRUPolicy
 from src.policy.checkpoint import save_policy, load_policy
 from src.training.es.es_loop import EvolutionStrategiesTrainer
 from src.training.es.params import get_flat_params
@@ -48,8 +50,14 @@ def parse_args():
                        help='Number of seeds per candidate evaluation (default: 1)')
     
     # Model parameters
+    parser.add_argument('--policy-type', type=str, choices=['mlp', 'gru'], default='mlp',
+                       help='Policy type: mlp (feedforward) or gru (recurrent) (default: mlp)')
     parser.add_argument('--hidden-dims', type=int, nargs='+', default=[256, 128],
-                       help='Hidden layer dimensions (default: 256 128)')
+                       help='Hidden layer dimensions for MLP trunk (default: 256 128)')
+    parser.add_argument('--gru-hidden-size', type=int, default=64,
+                       help='GRU hidden state size (default: 64)')
+    parser.add_argument('--gru-num-layers', type=int, default=1,
+                       help='Number of GRU layers (default: 1)')
     parser.add_argument('--v-scale', type=float, default=400.0,
                        help='Velocity normalization scale (default: 400.0)')
     parser.add_argument('--omega-scale', type=float, default=10.0,
@@ -171,14 +179,27 @@ def get_run_folder(args) -> str:
         return run_folder
 
 
-def create_model_constructor_and_kwargs(hidden_dims, v_scale, omega_scale):
+def create_model_constructor_and_kwargs(policy_type, hidden_dims, gru_hidden_size, gru_num_layers, v_scale, omega_scale):
     """Create model constructor and kwargs for ES trainer"""
-    model_ctor = SimpleMLP
-    model_kwargs = {
-        'input_dim': 388,  # Fixed observation dimension
-        'hidden_dims': tuple(hidden_dims),
-        'output_dim': 2
-    }
+    if policy_type == 'mlp':
+        model_ctor = SimpleMLP
+        model_kwargs = {
+            'input_dim': 388,  # Fixed observation dimension
+            'hidden_dims': tuple(hidden_dims),
+            'output_dim': 2
+        }
+    elif policy_type == 'gru':
+        model_ctor = RecurrentGRUPolicy
+        model_kwargs = {
+            'input_dim': 388,  # Fixed observation dimension
+            'trunk_dims': tuple(hidden_dims),
+            'hidden_size': gru_hidden_size,
+            'num_layers': gru_num_layers,
+            'output_dim': 2
+        }
+    else:
+        raise ValueError(f"Unknown policy type: {policy_type}")
+    
     return model_ctor, model_kwargs
 
 
@@ -193,7 +214,8 @@ def initialize_training(args, run_folder: str) -> tuple:
     
     # Create model constructor
     model_ctor, model_kwargs = create_model_constructor_and_kwargs(
-        args.hidden_dims, args.v_scale, args.omega_scale
+        args.policy_type, args.hidden_dims, args.gru_hidden_size, 
+        args.gru_num_layers, args.v_scale, args.omega_scale
     )
     
     # Initialize parameters
@@ -201,8 +223,10 @@ def initialize_training(args, run_folder: str) -> tuple:
         print(f"Resuming from checkpoint: {args.resume}")
         # Load checkpoint and extract parameters
         policy, _, metadata = load_policy(args.resume)
-        if not isinstance(policy, TorchMLPPolicy):
-            raise ValueError(f"Resume checkpoint must be TorchMLP policy, got {type(policy)}")
+        if args.policy_type == 'mlp' and not isinstance(policy, TorchMLPPolicy):
+            raise ValueError(f"Resume checkpoint must be TorchMLP policy for MLP mode, got {type(policy)}")
+        elif args.policy_type == 'gru' and not isinstance(policy, TorchGRUPolicy):
+            raise ValueError(f"Resume checkpoint must be TorchGRU policy for GRU mode, got {type(policy)}")
         
         theta = get_flat_params(policy.model)
         start_generation = metadata.get('generation', 0)
@@ -253,12 +277,26 @@ def save_checkpoint(run_folder: str, args, generation, theta, best_theta, best_f
                    model_ctor, model_kwargs, stats_history, is_best=False, viewer_queue=None):
     """Save training checkpoint"""
     # Create policy instance with best parameters
-    policy = TorchMLPPolicy(
-        hidden_dims=tuple(args.hidden_dims),
-        device='cpu',
-        v_scale=args.v_scale,
-        omega_scale=args.omega_scale
-    )
+    if args.policy_type == 'mlp':
+        policy = TorchMLPPolicy(
+            hidden_dims=tuple(args.hidden_dims),
+            device='cpu',
+            v_scale=args.v_scale,
+            omega_scale=args.omega_scale
+        )
+        policy_type_name = 'TorchMLP'
+    elif args.policy_type == 'gru':
+        policy = TorchGRUPolicy(
+            trunk_dims=tuple(args.hidden_dims),
+            hidden_size=args.gru_hidden_size,
+            num_layers=args.gru_num_layers,
+            device='cpu',
+            v_scale=args.v_scale,
+            omega_scale=args.omega_scale
+        )
+        policy_type_name = 'TorchGRU'
+    else:
+        raise ValueError(f"Unknown policy type: {args.policy_type}")
     
     # Load best parameters
     from src.training.es.params import set_flat_params
@@ -269,6 +307,7 @@ def save_checkpoint(run_folder: str, args, generation, theta, best_theta, best_f
         'generation': generation,
         'best_fitness': float(best_fitness),
         'training_method': 'Evolution Strategies',
+        'policy_type': args.policy_type,
         'pop_size': args.pop_size,
         'sigma': args.sigma,
         'alpha': args.alpha,
@@ -282,18 +321,25 @@ def save_checkpoint(run_folder: str, args, generation, theta, best_theta, best_f
         'stats_history': stats_history[-10:] if len(stats_history) > 10 else stats_history  # Last 10 entries
     }
     
+    # Add GRU-specific metadata
+    if args.policy_type == 'gru':
+        metadata.update({
+            'gru_hidden_size': args.gru_hidden_size,
+            'gru_num_layers': args.gru_num_layers
+        })
+    
     # Save checkpoint
     checkpoint_path = os.path.join(run_folder, f"{args.save_prefix}_gen_{generation:04d}.json")
-    save_policy(checkpoint_path, 'TorchMLP', policy.get_params(), sim_config, metadata, policy)
+    save_policy(checkpoint_path, policy_type_name, policy.get_params(), sim_config, metadata, policy)
     
     # Also save as "latest"
     latest_path = os.path.join(run_folder, f"{args.save_prefix}_latest.json")
-    save_policy(latest_path, 'TorchMLP', policy.get_params(), sim_config, metadata, policy)
+    save_policy(latest_path, policy_type_name, policy.get_params(), sim_config, metadata, policy)
     
     # If this is the best model, also save as "best"
     if is_best:
         best_path = os.path.join(run_folder, f"{args.save_prefix}_best.json")
-        save_policy(best_path, 'TorchMLP', policy.get_params(), sim_config, metadata, policy)
+        save_policy(best_path, policy_type_name, policy.get_params(), sim_config, metadata, policy)
         
         # Notify viewer of new best agent
         if viewer_queue is not None:
