@@ -18,7 +18,7 @@ from src.policy.manual import ManualPolicy
 from src.policy.checkpoint import load_policy
 
 
-def play_testcase(suite_path: str, case_id: str, agent_path: str = None):
+def play_testcase(suite_path: str, case_id: str, agent_path: str = None, dt: float = None):
     """
     Play a specific test case interactively
     
@@ -26,6 +26,7 @@ def play_testcase(suite_path: str, case_id: str, agent_path: str = None):
         suite_path: Path to test suite JSON file
         case_id: ID of test case to play
         agent_path: Optional path to agent checkpoint (defaults to manual control)
+        dt: Optional fixed timestep for physics simulation
     """
     # Load test suite
     try:
@@ -95,6 +96,11 @@ def play_testcase(suite_path: str, case_id: str, agent_path: str = None):
         from src.viz.pygame_single import run_simulation_gui
         
         print("Starting interactive GUI...")
+        if dt is not None:
+            print(f"Using fixed timestep: dt = {dt:.6f}")
+        else:
+            print("Using variable timestep based on FPS")
+        
         if agent_path:
             print("Controls:")
             print("  V: Toggle vision display")
@@ -112,7 +118,8 @@ def play_testcase(suite_path: str, case_id: str, agent_path: str = None):
             config=config,
             fps=60,
             policy_name=policy_name,
-            sim=sim  # Pass pre-configured simulation
+            sim=sim,  # Pass pre-configured simulation
+            dt=dt     # Pass fixed timestep if provided
         )
         
     except ImportError:
@@ -131,6 +138,8 @@ def main():
                        help='ID of test case to play')
     parser.add_argument('--agent', type=str, default=None,
                        help='Path to agent checkpoint file (default: manual control)')
+    parser.add_argument('--dt', type=float, default=None,
+                       help='Fixed timestep for physics simulation (default: variable based on FPS)')
     
     args = parser.parse_args()
     
@@ -144,7 +153,7 @@ def main():
         print(f"Agent checkpoint file not found: {args.agent}")
         return
     
-    play_testcase(args.suite, args.case_id, args.agent)
+    play_testcase(args.suite, args.case_id, args.agent, args.dt)
 
 
 if __name__ == "__main__":

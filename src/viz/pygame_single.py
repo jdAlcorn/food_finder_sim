@@ -240,8 +240,17 @@ def draw_ui(screen, font, sim, fps, show_vision, policy_name="Unknown"):
 
 
 def run_simulation_gui(policy: PolicyProtocol, config: SimulationConfig = None, 
-                      fps: int = 60, policy_name: str = "Unknown", sim=None):
-    """Run the pygame GUI with given policy"""
+                      fps: int = 60, policy_name: str = "Unknown", sim=None, dt: float = None):
+    """Run the pygame GUI with given policy
+    
+    Args:
+        policy: Policy to use for actions
+        config: Simulation configuration
+        fps: Target FPS for display
+        policy_name: Name to display in window title
+        sim: Pre-configured simulation (optional)
+        dt: Fixed timestep to use (optional, defaults to variable timestep based on fps)
+    """
     pygame.init()
     
     # Create or use provided simulation
@@ -266,7 +275,13 @@ def run_simulation_gui(policy: PolicyProtocol, config: SimulationConfig = None,
     policy.reset()
     
     while running:
-        dt = clock.tick(fps) / 1000.0  # Convert to seconds
+        if dt is not None:
+            # Use fixed timestep
+            clock.tick(fps)  # Still limit FPS for display
+            sim_dt = dt
+        else:
+            # Use variable timestep based on actual frame timing
+            sim_dt = clock.tick(fps) / 1000.0  # Convert to seconds
         
         # Handle events
         for event in pygame.event.get():
@@ -283,7 +298,7 @@ def run_simulation_gui(policy: PolicyProtocol, config: SimulationConfig = None,
         action = policy.act(sim_state)
         
         # Update simulation
-        step_info = sim.step(dt, action)
+        step_info = sim.step(sim_dt, action)
         
         # Print food collection
         if step_info['food_collected_this_step']:
