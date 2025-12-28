@@ -217,10 +217,10 @@ def viewer_process(message_queue: mp.Queue, viewer_config: ViewerConfig,
         
         # Check if we should advance to next test case
         elapsed_time = current_time - test_case_start_time
+        advance_to_next = False
+        
         if elapsed_time >= viewer_config.episode_seconds:
-            current_test_case_idx = (current_test_case_idx + 1) % len(suite.test_cases)
-            test_case_start_time = current_time
-            elapsed_time = 0
+            advance_to_next = True
         
         # Get current test case
         test_case = suite.test_cases[current_test_case_idx]
@@ -259,7 +259,14 @@ def viewer_process(message_queue: mp.Queue, viewer_config: ViewerConfig,
             
             if step_info.get('food_collected_this_step', False):
                 food_collected = True
+                advance_to_next = True
                 break
+        
+        # Advance to next test case if needed
+        if advance_to_next:
+            current_test_case_idx = (current_test_case_idx + 1) % len(suite.test_cases)
+            test_case_start_time = current_time
+            elapsed_time = 0
         
         # Render current state
         screen.fill(BLACK)
