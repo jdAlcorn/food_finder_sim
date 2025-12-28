@@ -11,6 +11,7 @@ import json
 import time
 import torch
 import numpy as np
+from datetime import datetime
 from typing import Dict, Any
 
 # Add src to path for imports
@@ -82,7 +83,7 @@ def parse_args():
     parser.add_argument('--log-interval', type=int, default=10,
                        help='Print stats every N generations (default: 10)')
     parser.add_argument('--csv-log', type=str, default=None,
-                       help='CSV file to log training statistics')
+                       help='CSV filename to log training statistics (default: training_log.csv, saved in run folder)')
     
     # ES parameters
     parser.add_argument('--antithetic', action='store_true', default=True,
@@ -113,6 +114,51 @@ def parse_args():
     return parser.parse_args()
 
 
+def create_run_folder(base_output_dir: str, save_prefix: str) -> str:
+    """Create a new run folder with timestamp"""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_folder = f"{save_prefix}_{timestamp}"
+    run_path = os.path.join(base_output_dir, run_folder)
+    os.makedirs(run_path, exist_ok=True)
+    
+    # Create a README file with run info
+    readme_path = os.path.join(run_path, "README.txt")
+    with open(readme_path, 'w') as f:
+        f.write(f"ES Training Run\n")
+        f.write(f"===============\n")
+        f.write(f"Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"Run ID: {run_folder}\n")
+        f.write(f"\nFiles in this folder:\n")
+        f.write(f"- {save_prefix}_best.json: Best performing model\n")
+        f.write(f"- {save_prefix}_latest.json: Most recent model\n")
+        f.write(f"- {save_prefix}_gen_XXXX.json: Periodic checkpoints\n")
+        f.write(f"- training_log.csv: Training statistics (if enabled)\n")
+        f.write(f"- README.txt: This file\n")
+    
+    return run_path
+
+
+def extract_run_folder_from_resume_path(resume_path: str) -> str:
+    """Extract the run folder from a resume checkpoint path"""
+    # Resume path should be like: checkpoints/es_trained_20241228_143022/es_trained_gen_0100.json
+    # We want to extract: checkpoints/es_trained_20241228_143022
+    return os.path.dirname(resume_path)
+
+
+def get_run_folder(args) -> str:
+    """Get the run folder - either create new or extract from resume path"""
+    if args.resume:
+        # Resuming - use the same folder as the original run
+        run_folder = extract_run_folder_from_resume_path(args.resume)
+        print(f"Resuming run in folder: {run_folder}")
+        return run_folder
+    else:
+        # New run - create timestamped folder
+        run_folder = create_run_folder(args.output_dir, args.save_prefix)
+        print(f"Created new run folder: {run_folder}")
+        return run_folder
+
+
 def create_model_constructor_and_kwargs(hidden_dims, v_scale, omega_scale):
     """Create model constructor and kwargs for ES trainer"""
     model_ctor = SimpleMLP
@@ -124,7 +170,7 @@ def create_model_constructor_and_kwargs(hidden_dims, v_scale, omega_scale):
     return model_ctor, model_kwargs
 
 
-def initialize_training(args) -> tuple:
+def initialize_training(args, run_folder: str) -> tuple:
     """Initialize training components"""
     # Set random seed
     np.random.seed(args.seed)
@@ -191,7 +237,7 @@ def initialize_training(args) -> tuple:
     return trainer, theta, start_generation, best_fitness_so_far, sim_config, model_ctor, model_kwargs
 
 
-def save_checkpoint(args, generation, theta, best_theta, best_fitness, sim_config, 
+def save_checkpoint(run_folder: str, args, generation, theta, best_theta, best_fitness, sim_config, 
                    model_ctor, model_kwargs, stats_history, is_best=False):
     """Save training checkpoint"""
     # Create policy instance with best parameters
@@ -220,39 +266,39 @@ def save_checkpoint(args, generation, theta, best_theta, best_fitness, sim_confi
         'v_scale': args.v_scale,
         'omega_scale': args.omega_scale,
         'total_parameters': theta.numel(),
+        'run_folder': os.path.basename(run_folder),  # Store run folder name for reference
         'stats_history': stats_history[-10:] if len(stats_history) > 10 else stats_history  # Last 10 entries
     }
     
     # Save checkpoint
-    checkpoint_path = os.path.join(args.output_dir, f"{args.save_prefix}_gen_{generation:04d}.json")
+    checkpoint_path = os.path.join(run_folder, f"{args.save_prefix}_gen_{generation:04d}.json")
     save_policy(checkpoint_path, 'TorchMLP', policy.get_params(), sim_config, metadata, policy)
     
     # Also save as "latest"
-    latest_path = os.path.join(args.output_dir, f"{args.save_prefix}_latest.json")
+    latest_path = os.path.join(run_folder, f"{args.save_prefix}_latest.json")
     save_policy(latest_path, 'TorchMLP', policy.get_params(), sim_config, metadata, policy)
     
     # If this is the best model, also save as "best"
     if is_best:
-        best_path = os.path.join(args.output_dir, f"{args.save_prefix}_best.json")
+        best_path = os.path.join(run_folder, f"{args.save_prefix}_best.json")
         save_policy(best_path, 'TorchMLP', policy.get_params(), sim_config, metadata, policy)
         return best_path
     
     return checkpoint_path
 
 
-def setup_csv_logging(csv_path):
-    """Setup CSV logging"""
-    if csv_path:
-        # Create directory if needed
-        os.makedirs(os.path.dirname(csv_path), exist_ok=True)
+def setup_csv_logging(run_folder: str, csv_filename: str):
+    """Setup CSV logging in the run folder"""
+    if csv_filename:
+        csv_path = os.path.join(run_folder, csv_filename)
         
         # Write header
         with open(csv_path, 'w') as f:
             f.write('generation,fitness_mean,fitness_std,fitness_max,fitness_min,best_fitness,'
                    'gradient_norm,param_norm,sigma,alpha,elapsed_time\n')
         
-        return True
-    return False
+        return csv_path
+    return None
 
 
 def log_to_csv(csv_path, generation, stats, elapsed_time):
@@ -286,14 +332,19 @@ def main():
     print(f"Batched evaluation: Always enabled")
     batch_size = args.eval_batch_size or args.eval_seeds
     print(f"Eval batch size: {batch_size}")
-    print(f"Output dir: {args.output_dir}")
+    print(f"Base output dir: {args.output_dir}")
+    
+    # Get or create run folder
+    run_folder = get_run_folder(args)
+    print(f"Run folder: {run_folder}")
     print()
     
     # Initialize training
-    trainer, theta, start_generation, best_fitness_so_far, sim_config, model_ctor, model_kwargs = initialize_training(args)
+    trainer, theta, start_generation, best_fitness_so_far, sim_config, model_ctor, model_kwargs = initialize_training(args, run_folder)
     
     # Setup logging
-    csv_logging = setup_csv_logging(args.csv_log)
+    csv_filename = args.csv_log or "training_log.csv"
+    csv_path = setup_csv_logging(run_folder, csv_filename)
     
     # Training state
     best_theta = theta.clone()
@@ -315,7 +366,7 @@ def main():
                 
                 # Save best model immediately when new best is found
                 best_checkpoint_path = save_checkpoint(
-                    args, generation + 1, theta, best_theta, best_fitness_so_far,
+                    run_folder, args, generation + 1, theta, best_theta, best_fitness_so_far,
                     sim_config, model_ctor, model_kwargs, stats_history,
                     is_best=True
                 )
@@ -354,13 +405,13 @@ def main():
                 print(base_log)
             
             # CSV logging
-            if csv_logging:
-                log_to_csv(args.csv_log, generation, stats, gen_elapsed)
+            if csv_path:
+                log_to_csv(csv_path, generation, stats, gen_elapsed)
             
             # Save checkpoint
             if (generation + 1) % args.save_interval == 0 or generation == start_generation + args.generations - 1:
                 checkpoint_path = save_checkpoint(
-                    args, generation + 1, theta, best_theta, best_fitness_so_far,
+                    run_folder, args, generation + 1, theta, best_theta, best_fitness_so_far,
                     sim_config, model_ctor, model_kwargs, stats_history,
                     is_best=False
                 )
@@ -370,7 +421,7 @@ def main():
         print("\nTraining interrupted by user")
         # Save final checkpoint
         checkpoint_path = save_checkpoint(
-            args, generation, theta, best_theta, best_fitness_so_far,
+            run_folder, args, generation, theta, best_theta, best_fitness_so_far,
             sim_config, model_ctor, model_kwargs, stats_history,
             is_best=False
         )
@@ -385,6 +436,7 @@ def main():
     print(f"\nTraining completed!")
     print(f"Total time: {total_time/60:.1f} minutes")
     print(f"Final best fitness: {best_fitness_so_far:.2f}")
+    print(f"Run folder: {run_folder}")
     print(f"Final checkpoint saved")
 
 
