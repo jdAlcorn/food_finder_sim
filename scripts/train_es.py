@@ -12,7 +12,7 @@ import time
 import torch
 import numpy as np
 from datetime import datetime
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 # Add src to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -23,6 +23,14 @@ from src.policy.nn_torch_mlp import TorchMLPPolicy
 from src.policy.checkpoint import save_policy, load_policy
 from src.training.es.es_loop import EvolutionStrategiesTrainer
 from src.training.es.params import get_flat_params
+
+# Viewer imports (only imported if needed)
+viewer_available = False
+try:
+    from src.viz.live_viewer import ViewerConfig, start_viewer_process, notify_new_best, shutdown_viewer
+    viewer_available = True
+except ImportError:
+    pass
 
 
 def parse_args():
@@ -100,6 +108,18 @@ def parse_args():
                        help='Evaluation mode: suite (deterministic test cases) or respawn (random food spawns)')
     parser.add_argument('--test-suite', type=str, default=None,
                        help='Path to test suite JSON file (default: data/test_suites/basic_v1.json)')
+    
+    # Viewer parameters
+    parser.add_argument('--viewer', action='store_true', default=False,
+                       help='Enable live viewer showing best agent on test cases')
+    parser.add_argument('--viewer-episode-seconds', type=float, default=10.0,
+                       help='Duration to show each test case in viewer (default: 10.0)')
+    parser.add_argument('--viewer-dt', type=float, default=1/60,
+                       help='Physics timestep for viewer (default: 1/60)')
+    parser.add_argument('--viewer-fps', type=int, default=60,
+                       help='Viewer FPS cap (default: 60)')
+    parser.add_argument('--viewer-window-size', type=int, nargs=2, default=[800, 800],
+                       help='Viewer window size [width height] (default: 800 800)')
     
     # Profiling parameters
     parser.add_argument('--profile-one-candidate-per-gen', action='store_true', default=False,
@@ -238,7 +258,7 @@ def initialize_training(args, run_folder: str) -> tuple:
 
 
 def save_checkpoint(run_folder: str, args, generation, theta, best_theta, best_fitness, sim_config, 
-                   model_ctor, model_kwargs, stats_history, is_best=False):
+                   model_ctor, model_kwargs, stats_history, is_best=False, viewer_queue=None):
     """Save training checkpoint"""
     # Create policy instance with best parameters
     policy = TorchMLPPolicy(
@@ -282,6 +302,11 @@ def save_checkpoint(run_folder: str, args, generation, theta, best_theta, best_f
     if is_best:
         best_path = os.path.join(run_folder, f"{args.save_prefix}_best.json")
         save_policy(best_path, 'TorchMLP', policy.get_params(), sim_config, metadata, policy)
+        
+        # Notify viewer of new best agent
+        if viewer_queue is not None:
+            notify_new_best(viewer_queue, best_path)
+        
         return best_path
     
     return checkpoint_path
@@ -333,14 +358,47 @@ def main():
     batch_size = args.eval_batch_size or args.eval_seeds
     print(f"Eval batch size: {batch_size}")
     print(f"Base output dir: {args.output_dir}")
+    if args.viewer:
+        print(f"Live viewer: Enabled ({args.viewer_episode_seconds}s per test case, {args.viewer_fps} FPS)")
+    else:
+        print(f"Live viewer: Disabled")
     
     # Get or create run folder
     run_folder = get_run_folder(args)
     print(f"Run folder: {run_folder}")
+    
+    # Initialize viewer if requested
+    viewer_process = None
+    viewer_queue = None
+    if args.viewer:
+        if not viewer_available:
+            print("ERROR: Viewer requested but pygame/viewer dependencies not available")
+            return
+        
+        print("Initializing live viewer...")
+        viewer_config = ViewerConfig(
+            episode_seconds=args.viewer_episode_seconds,
+            dt=args.viewer_dt,
+            fps=args.viewer_fps,
+            window_width=args.viewer_window_size[0],
+            window_height=args.viewer_window_size[1],
+            test_suite_path=args.test_suite or "data/test_suites/basic_v1.json"
+        )
+        
+        # Start viewer process (initially with no checkpoint)
+        viewer_process, viewer_queue = start_viewer_process(viewer_config)
+    
     print()
     
     # Initialize training
     trainer, theta, start_generation, best_fitness_so_far, sim_config, model_ctor, model_kwargs = initialize_training(args, run_folder)
+    
+    # If resuming and viewer is enabled, notify viewer of existing best checkpoint
+    if args.viewer and args.resume and viewer_queue is not None:
+        existing_best_path = os.path.join(run_folder, f"{args.save_prefix}_best.json")
+        if os.path.exists(existing_best_path):
+            print(f"Notifying viewer of existing best checkpoint: {existing_best_path}")
+            notify_new_best(viewer_queue, existing_best_path)
     
     # Setup logging
     csv_filename = args.csv_log or "training_log.csv"
@@ -368,7 +426,7 @@ def main():
                 best_checkpoint_path = save_checkpoint(
                     run_folder, args, generation + 1, theta, best_theta, best_fitness_so_far,
                     sim_config, model_ctor, model_kwargs, stats_history,
-                    is_best=True
+                    is_best=True, viewer_queue=viewer_queue
                 )
                 print(f"🏆 New best fitness {best_fitness_so_far:.2f}! Saved: {best_checkpoint_path}")
             
@@ -413,7 +471,7 @@ def main():
                 checkpoint_path = save_checkpoint(
                     run_folder, args, generation + 1, theta, best_theta, best_fitness_so_far,
                     sim_config, model_ctor, model_kwargs, stats_history,
-                    is_best=False
+                    is_best=False, viewer_queue=viewer_queue
                 )
                 print(f"Saved checkpoint: {checkpoint_path}")
     
@@ -423,13 +481,22 @@ def main():
         checkpoint_path = save_checkpoint(
             run_folder, args, generation, theta, best_theta, best_fitness_so_far,
             sim_config, model_ctor, model_kwargs, stats_history,
-            is_best=False
+            is_best=False, viewer_queue=viewer_queue
         )
         print(f"Saved final checkpoint: {checkpoint_path}")
     
     finally:
         # Always clean up the trainer's executor
         trainer.shutdown()
+        
+        # Shutdown viewer if running
+        if viewer_process is not None:
+            print("Shutting down viewer...")
+            shutdown_viewer(viewer_queue)
+            viewer_process.join(timeout=5.0)  # Wait up to 5 seconds
+            if viewer_process.is_alive():
+                print("Viewer did not shut down gracefully, terminating...")
+                viewer_process.terminate()
     
     # Final summary
     total_time = time.time() - start_time

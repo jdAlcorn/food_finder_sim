@@ -50,8 +50,13 @@ def save_policy(path: str, policy_name: str, policy_params: Dict[str, Any],
     # Ensure directory exists
     os.makedirs(os.path.dirname(path), exist_ok=True)
     
-    with open(path, 'w') as f:
+    # Use atomic write to prevent race conditions with viewer
+    temp_path = path + '.tmp'
+    with open(temp_path, 'w') as f:
         json.dump(checkpoint, f, indent=2)
+    
+    # Atomic rename
+    os.rename(temp_path, path)
     
     print(f"Saved policy checkpoint to {path}")
     if weights_path:

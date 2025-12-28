@@ -35,6 +35,7 @@ Controls:
 - `W` - Forward thrust (hold)
 - `A/D` - Steer left/right  
 - `V` - Toggle vision display
+- `N` - Next test case (viewer only)
 - `ESC` - Quit
 
 ### Watch a Loaded Agent
