@@ -72,7 +72,7 @@ class TorchMLPPolicy(Policy):
         """Reset policy state"""
         self.last_obs = None
         self.last_action = None
-        self.obs_logged = False
+        # Don't reset obs_logged - we only want to log once per policy instance
     
     def act(self, sim_state: Dict[str, Any]) -> Dict[str, float]:
         """

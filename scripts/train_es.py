@@ -302,6 +302,9 @@ def save_checkpoint(run_folder: str, args, generation, theta, best_theta, best_f
                 notify_new_best(viewer_queue, best_path)
             except ImportError:
                 pass  # Viewer not available
+            except:
+                # Viewer process might be dead, ignore silently
+                pass
         
         return best_path
     
