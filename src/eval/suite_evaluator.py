@@ -24,7 +24,8 @@ def evaluate_candidate_on_suite(
     device: str = "cpu",
     v_scale: float = 400.0,
     omega_scale: float = 10.0,
-    max_range: float = None
+    max_range: float = None,
+    fail_weight: float = 0.20
 ) -> Tuple[float, np.ndarray, Dict[str, Any]]:
     """
     Evaluate a candidate policy on a test suite
@@ -41,6 +42,7 @@ def evaluate_candidate_on_suite(
         v_scale: Velocity normalization scale
         omega_scale: Angular velocity normalization scale
         max_range: Maximum range for proximity scoring (default: sim_config.max_range)
+        fail_weight: Weight for progress score on failed test cases (default: 0.20)
         
     Returns:
         Tuple of (fitness_mean, per_case_scores, metadata)
@@ -63,6 +65,7 @@ def evaluate_candidate_on_suite(
     # Evaluate test cases in batches
     all_scores = []
     all_reached = []
+    all_diagnostics = []
     
     test_cases = list(suite.test_cases)
     
@@ -72,23 +75,47 @@ def evaluate_candidate_on_suite(
         current_batch_size = len(batch_cases)
         
         # Evaluate this batch
-        batch_scores, batch_reached = _evaluate_test_case_batch(
+        batch_scores, batch_reached, batch_diagnostics = _evaluate_test_case_batch(
             model, batch_cases, sim_config, dt, current_batch_size,
-            device, v_scale, omega_scale, max_range
+            device, v_scale, omega_scale, max_range, fail_weight
         )
         
         all_scores.extend(batch_scores)
         all_reached.extend(batch_reached)
+        all_diagnostics.append(batch_diagnostics)
     
     # Compute overall statistics
     per_case_scores = np.array(all_scores)
     fitness_mean = float(np.mean(per_case_scores))
     
+    # Aggregate diagnostics across batches
+    total_passes = sum(d['passes_count'] for d in all_diagnostics)
+    all_pass_times = []
+    all_fail_progresses = []
+    all_min_dist_ratios = []
+    
+    for d in all_diagnostics:
+        if d['mean_pass_time'] is not None:
+            # Reconstruct individual pass times (approximation for logging)
+            all_pass_times.extend([d['mean_pass_time']] * d['passes_count'])
+        if d['mean_fail_progress'] is not None:
+            fail_count = len(test_cases) // len(all_diagnostics) - d['passes_count']
+            all_fail_progresses.extend([d['mean_fail_progress']] * fail_count)
+        if d['mean_min_dist_ratio'] is not None:
+            fail_count = len(test_cases) // len(all_diagnostics) - d['passes_count']
+            all_min_dist_ratios.extend([d['mean_min_dist_ratio']] * fail_count)
+    
     metadata = {
         'per_case_reached': np.array(all_reached),
         'num_reached': int(np.sum(all_reached)),
         'num_total': len(test_cases),
-        'success_rate': float(np.mean(all_reached))
+        'success_rate': float(np.mean(all_reached)),
+        # Dense fitness diagnostics
+        'passes_count': total_passes,
+        'mean_pass_time': float(np.mean(all_pass_times)) if all_pass_times else None,
+        'mean_fail_progress': float(np.mean(all_fail_progresses)) if all_fail_progresses else None,
+        'mean_min_dist_ratio': float(np.mean(all_min_dist_ratios)) if all_min_dist_ratios else None,
+        'fail_weight': fail_weight
     }
     
     return fitness_mean, per_case_scores, metadata
@@ -103,13 +130,17 @@ def _evaluate_test_case_batch(
     device: str,
     v_scale: float,
     omega_scale: float,
-    max_range: float
-) -> Tuple[List[float], List[bool]]:
+    max_range: float,
+    fail_weight: float = 0.20
+) -> Tuple[List[float], List[bool], Dict[str, Any]]:
     """
-    Evaluate a batch of test cases
+    Evaluate a batch of test cases with dense progress-based fitness
+    
+    Args:
+        fail_weight: Weight for progress score on failed test cases (default: 0.20)
     
     Returns:
-        Tuple of (scores, reached_flags)
+        Tuple of (scores, reached_flags, diagnostics)
     """
     # Create batched simulation
     batched_sim = BatchedSimulation(batch_size, sim_config)
@@ -146,10 +177,20 @@ def _evaluate_test_case_batch(
     # Reset simulation to test case states
     batched_sim.reset_to_states(agent_states, food_states)
     
+    # Calculate initial distances (d0) for progress tracking
+    initial_distances = np.zeros(batch_size, dtype=float)
+    for i in range(batch_size):
+        agent_x = agent_states[i]['x']
+        agent_y = agent_states[i]['y']
+        food_x = food_states[i]['x']
+        food_y = food_states[i]['y']
+        initial_distances[i] = math.sqrt((agent_x - food_x)**2 + (agent_y - food_y)**2)
+    
     # Track evaluation metrics
     reached = np.zeros(batch_size, dtype=bool)
     step_reached = np.full(batch_size, -1, dtype=int)
-    min_distances = np.full(batch_size, float('inf'), dtype=float)
+    min_distances = initial_distances.copy()  # Initialize with d0
+    final_distances = np.zeros(batch_size, dtype=float)
     
     # Determine maximum steps for this batch
     max_steps = max(max_steps_list)
@@ -201,6 +242,7 @@ def _evaluate_test_case_batch(
                 
                 distance = math.sqrt((agent_x - food_x)**2 + (agent_y - food_y)**2)
                 min_distances[i] = min(min_distances[i], distance)
+                final_distances[i] = distance  # Track final distance for diagnostics
                 
                 # Check if food was reached
                 collision_distance = sim_config.agent_radius + test_cases[i].food.radius
@@ -208,53 +250,42 @@ def _evaluate_test_case_batch(
                     reached[i] = True
                     step_reached[i] = step
     
-    # Calculate scores using the scoring function
+    # Calculate scores using the new dense fitness function
     scores = []
+    pass_times = []
+    fail_progresses = []
+    min_dist_ratios = []
+    
+    eps = 1e-6  # Avoid divide-by-zero
+    
     for i in range(batch_size):
-        score = _calculate_test_case_score(
-            reached[i], step_reached[i], min_distances[i], 
-            max_steps_list[i], max_range
-        )
+        if reached[i]:
+            # Pass scoring: 1.0 + efficiency bonus [1.0, 2.0]
+            efficiency_bonus = (max_steps_list[i] - step_reached[i]) / max_steps_list[i]
+            score = 1.0 + efficiency_bonus
+            pass_times.append(step_reached[i])
+        else:
+            # Fail scoring: progress-based dense reward [0.0, fail_weight]
+            d0 = max(initial_distances[i], eps)
+            progress = np.clip(1.0 - (min_distances[i] / d0), 0.0, 1.0)
+            score = fail_weight * progress
+            fail_progresses.append(progress)
+            min_dist_ratios.append(min_distances[i] / d0)
+        
         scores.append(score)
     
-    return scores, reached.tolist()
-
-
-def _calculate_test_case_score(
-    reached: bool,
-    step_reached: int,
-    min_distance: float,
-    max_steps: int,
-    max_range: float
-) -> float:
-    """
-    Calculate score for a single test case
+    # Compile diagnostics
+    diagnostics = {
+        'passes_count': int(np.sum(reached)),
+        'mean_pass_time': float(np.mean(pass_times)) if pass_times else None,
+        'mean_fail_progress': float(np.mean(fail_progresses)) if fail_progresses else None,
+        'mean_min_dist_ratio': float(np.mean(min_dist_ratios)) if min_dist_ratios else None,
+        'initial_distances': initial_distances.tolist(),
+        'min_distances': min_distances.tolist(),
+        'final_distances': final_distances.tolist()
+    }
     
-    Scoring function:
-    - If reached: score = 1.0 + (max_steps - step_reached) / max_steps  # in [1, 2]
-    - Else: score = 0.25 * (1.0 - clip(min_dist / max_range, 0, 1))     # in [0, 0.25]
-    
-    Args:
-        reached: Whether food was reached
-        step_reached: Step when food was reached (-1 if not reached)
-        min_distance: Minimum distance achieved to food
-        max_steps: Maximum steps allowed for this test case
-        max_range: Maximum range for proximity scoring
-        
-    Returns:
-        Score for this test case
-    """
-    if reached:
-        # Success bonus + efficiency bonus
-        efficiency_bonus = (max_steps - step_reached) / max_steps
-        score = 1.0 + efficiency_bonus  # Range: [1.0, 2.0]
-    else:
-        # Partial credit based on proximity
-        normalized_distance = np.clip(min_distance / max_range, 0.0, 1.0)
-        proximity_score = 1.0 - normalized_distance
-        score = 0.25 * proximity_score  # Range: [0.0, 0.25]
-    
-    return float(score)
+    return scores, reached.tolist(), diagnostics
 
 
 def evaluate_suite_summary(suite: TestSuite, per_case_scores: np.ndarray, 

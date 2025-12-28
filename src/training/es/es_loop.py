@@ -150,7 +150,19 @@ class EvolutionStrategiesTrainer:
             candidates.append(candidate_theta)
         
         # Evaluate candidates in parallel
-        fitnesses = self._evaluate_candidates_parallel(candidates, iteration)
+        results = self._evaluate_candidates_parallel(candidates, iteration)
+        
+        # Extract fitnesses and diagnostics
+        fitnesses = []
+        all_diagnostics = []
+        for result in results:
+            if len(result) == 3:  # Suite mode with diagnostics
+                candidate_idx, fitness, diagnostics = result
+                fitnesses.append(fitness)
+                all_diagnostics.append((candidate_idx, diagnostics))
+            else:  # Respawn mode or old format
+                candidate_idx, fitness = result
+                fitnesses.append(fitness)
         
         # Convert to numpy for ES update
         fitnesses = np.array(fitnesses)
@@ -171,6 +183,14 @@ class EvolutionStrategiesTrainer:
         best_fitness = fitnesses[best_idx]
         best_candidate_theta = candidates[best_idx]
         
+        # Get diagnostics for best candidate (suite mode only)
+        best_diagnostics = {}
+        if all_diagnostics:
+            for candidate_idx, diagnostics in all_diagnostics:
+                if candidate_idx == best_idx:
+                    best_diagnostics = diagnostics
+                    break
+        
         # Compile statistics
         stats = {
             'fitness_mean': float(fitness_mean),
@@ -183,6 +203,16 @@ class EvolutionStrategiesTrainer:
             'sigma': self.sigma,
             'alpha': self.alpha
         }
+        
+        # Add suite diagnostics if available
+        if best_diagnostics:
+            stats.update({
+                'passes_count': best_diagnostics.get('passes_count', 0),
+                'mean_pass_time': best_diagnostics.get('mean_pass_time'),
+                'mean_fail_progress': best_diagnostics.get('mean_fail_progress'),
+                'mean_min_dist_ratio': best_diagnostics.get('mean_min_dist_ratio'),
+                'fail_weight': best_diagnostics.get('fail_weight', 0.20)
+            })
         
         return theta_new, stats, best_candidate_theta, best_fitness
     
@@ -262,16 +292,15 @@ class EvolutionStrategiesTrainer:
         
         eval_time = time.time() - eval_start_time
         
-        # Sort results by candidate index and extract fitnesses
+        # Sort results by candidate index
         results.sort(key=lambda x: x[0])
-        fitnesses = [result[1] for result in results]
         
         # Log timing (only occasionally to avoid spam)
         if iteration % 10 == 0:
             mode_info = f"suite ({len(self.test_suite)} cases)" if self.eval_mode == "suite" else f"respawn ({self.eval_seeds_per_candidate} seeds)"
             print(f"  Generation {iteration} evaluation time: {eval_time:.3f}s ({mode_info})")
         
-        return fitnesses
+        return results
     
     def update_hyperparameters(self, **kwargs):
         """Update hyperparameters during training"""

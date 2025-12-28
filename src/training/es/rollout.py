@@ -458,6 +458,7 @@ def evaluate_candidate_suite_worker(args):
         batch_size = fitness_kwargs.get('batch_size', 32)
         v_scale = fitness_kwargs.get('v_scale', 400.0)
         omega_scale = fitness_kwargs.get('omega_scale', 10.0)
+        fail_weight = fitness_kwargs.get('fail_weight', 0.20)
         
         # Evaluate on test suite
         fitness_mean, per_case_scores, metadata = evaluate_candidate_on_suite(
@@ -470,14 +471,16 @@ def evaluate_candidate_suite_worker(args):
             batch_size=batch_size,
             device="cpu",  # Force CPU for multiprocessing compatibility
             v_scale=v_scale,
-            omega_scale=omega_scale
+            omega_scale=omega_scale,
+            fail_weight=fail_weight
         )
         
-        return candidate_idx, fitness_mean
+        # Return fitness and diagnostics for the best candidate logging
+        return candidate_idx, fitness_mean, metadata
         
     except Exception as e:
         print(f"Suite worker {candidate_idx} failed: {e}")
-        return candidate_idx, -10000.0
+        return candidate_idx, -10000.0, {}
 
 
 def test_rollout():

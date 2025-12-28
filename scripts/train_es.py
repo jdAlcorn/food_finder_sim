@@ -59,6 +59,8 @@ def parse_args():
                        help='Points awarded per food collected (default: 1000.0)')
     parser.add_argument('--proximity-reward-scale', type=float, default=1.0,
                        help='Scale factor for proximity reward (default: 1.0)')
+    parser.add_argument('--fail-weight', type=float, default=0.20,
+                       help='Weight for progress-based fitness on failed test cases (default: 0.20, range [0,0.2])')
     
     # System parameters
     parser.add_argument('--workers', type=int, default=None,
@@ -175,6 +177,7 @@ def initialize_training(args) -> tuple:
         fitness_kwargs={
             'food_reward_multiplier': args.food_reward,
             'proximity_reward_scale': args.proximity_reward_scale,
+            'fail_weight': args.fail_weight,
             'profile_enabled': args.profile_one_candidate_per_gen,
             'profile_candidate_idx': args.profile_candidate_idx,
             'profile_max_steps': args.profile_max_steps,
@@ -277,6 +280,7 @@ def main():
     if args.eval_mode == "suite":
         suite_path = args.test_suite or "data/test_suites/basic_v1.json"
         print(f"Test suite: {suite_path}")
+        print(f"Fail weight: {args.fail_weight} (progress-based fitness for failed cases)")
     else:
         print(f"Seeds per candidate: {args.eval_seeds}")
     print(f"Batched evaluation: Always enabled")
@@ -327,14 +331,27 @@ def main():
             # Logging
             if generation % args.log_interval == 0 or generation == start_generation:
                 total_elapsed = time.time() - start_time
-                print(f"Gen {generation:4d}: "
-                      f"mean={stats['fitness_mean']:7.2f} "
-                      f"best={stats['best_fitness']:7.2f} "
-                      f"best_ever={best_fitness_so_far:7.2f} "
-                      f"std={stats['fitness_std']:6.2f} "
-                      f"grad_norm={stats['gradient_norm']:8.4f} "
-                      f"time={gen_elapsed:5.2f}s "
-                      f"total={total_elapsed/60:5.1f}m")
+                base_log = (f"Gen {generation:4d}: "
+                           f"mean={stats['fitness_mean']:7.2f} "
+                           f"best={stats['best_fitness']:7.2f} "
+                           f"best_ever={best_fitness_so_far:7.2f} "
+                           f"std={stats['fitness_std']:6.2f} "
+                           f"grad_norm={stats['gradient_norm']:8.4f} "
+                           f"time={gen_elapsed:5.2f}s "
+                           f"total={total_elapsed/60:5.1f}m")
+                
+                # Add suite diagnostics if available
+                if 'passes_count' in stats:
+                    suite_log = (f" | passes={stats['passes_count']}")
+                    if stats.get('mean_pass_time') is not None:
+                        suite_log += f" pass_time={stats['mean_pass_time']:.1f}"
+                    if stats.get('mean_fail_progress') is not None:
+                        suite_log += f" fail_prog={stats['mean_fail_progress']:.3f}"
+                    if stats.get('mean_min_dist_ratio') is not None:
+                        suite_log += f" min_dist_ratio={stats['mean_min_dist_ratio']:.3f}"
+                    base_log += suite_log
+                
+                print(base_log)
             
             # CSV logging
             if csv_logging:
