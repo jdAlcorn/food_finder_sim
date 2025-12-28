@@ -52,6 +52,9 @@ class BatchedSimulation:
         self.food_collected = np.zeros(batch_size, dtype=np.int32)
         self.done = np.zeros(batch_size, dtype=bool)
         
+        # Seed tracking for deterministic food respawning
+        self.initial_seeds = np.zeros(batch_size, dtype=np.int64)
+        
         # Initialize environments
         self.reset()
     
@@ -71,6 +74,9 @@ class BatchedSimulation:
             seeds = list(range(self.B))
         
         assert len(seeds) == self.B, f"Expected {self.B} seeds, got {len(seeds)}"
+        
+        # Store initial seeds for deterministic respawning
+        self.initial_seeds = np.array(seeds, dtype=np.int64)
         
         # Reset agent positions to center
         center_x = self.config.world_width / 2
@@ -270,7 +276,12 @@ class BatchedSimulation:
     
     def _respawn_food_for_envs(self, env_mask: np.ndarray):
         """
-        Respawn food for specified environments
+        Respawn food for specified environments using deterministic seeding
+        
+        DETERMINISTIC RESPAWN DESIGN:
+        - Uses initial seed + food collection count for deterministic respawning
+        - Same environment with same food collection history = same food positions
+        - Cross-platform reproducible (no hash() dependency)
         
         Args:
             env_mask: Boolean mask indicating which environments need food respawn
@@ -282,9 +293,14 @@ class BatchedSimulation:
         
         # Generate new food positions for environments that need it
         for i in np.where(env_mask)[0]:
-            # Use current step count as additional randomness
-            seed = hash((i, int(self.step_count[i]))) % (2**31)
-            rng = np.random.RandomState(seed)
+            # Deterministic seed based on initial seed + food collection count
+            # This ensures same food positions for same collection history
+            respawn_seed = int(self.initial_seeds[i]) + int(self.food_collected[i]) * 1000000
+            
+            # Ensure seed is in valid range for numpy.random.RandomState
+            respawn_seed = respawn_seed % (2**31 - 1)
+            
+            rng = np.random.RandomState(respawn_seed)
             self.food_x[i] = rng.uniform(min_coord, max_x)
             self.food_y[i] = rng.uniform(min_coord, max_y)
         
