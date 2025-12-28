@@ -1,0 +1,85 @@
+{
+  "world_id": "test_world",
+  "version": "1.0",
+  "description": "World created with visual editor",
+  "bounds": {
+    "width": 800.0,
+    "height": 800.0
+  },
+  "physics": {
+    "agent_max_thrust": null,
+    "agent_max_turn_accel": null,
+    "agent_linear_drag": null,
+    "agent_angular_drag": null,
+    "wall_restitution": null
+  },
+  "geometry": {
+    "rectangles": [
+      {
+        "x": 454.0,
+        "y": 529.5,
+        "width": 300.0,
+        "height": 61.0,
+        "material_id": 3
+      },
+      {
+        "x": 200.5,
+        "y": 190.5,
+        "width": 399.0,
+        "height": 101.0,
+        "material_id": 3
+      },
+      {
+        "x": 87.5,
+        "y": 455.5,
+        "width": 199.0,
+        "height": 239.0,
+        "material_id": 3
+      },
+      {
+        "x": 343.0,
+        "y": 435.0,
+        "width": 80.0,
+        "height": 144.0,
+        "material_id": 3
+      },
+      {
+        "x": 581.0,
+        "y": 340.5,
+        "width": 82.0,
+        "height": 321.0,
+        "material_id": 3
+      },
+      {
+        "x": 721.5,
+        "y": 560.0,
+        "width": 163.0,
+        "height": 40.0,
+        "material_id": 3
+      },
+      {
+        "x": 661.0,
+        "y": 360.0,
+        "width": 78.0,
+        "height": 40.0,
+        "material_id": 3
+      },
+      {
+        "x": 701.0,
+        "y": 217.0,
+        "width": 200.0,
+        "height": 40.0,
+        "material_id": 3
+      },
+      {
+        "x": 490.5,
+        "y": 101.5,
+        "width": 101.0,
+        "height": 83.0,
+        "material_id": 3
+      }
+    ],
+    "circles": [],
+    "segments": []
+  }
+}

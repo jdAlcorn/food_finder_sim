@@ -1,0 +1,132 @@
+{
+  "suite_id": "obstacles_suite",
+  "version": "1.0",
+  "description": "Custom test suite created interactively",
+  "test_cases": [
+    {
+      "id": "near_food",
+      "max_steps": 600,
+      "dt": null,
+      "agent_start": {
+        "x": 355.0,
+        "y": 90.0,
+        "theta": 0.0,
+        "vx": 0.0,
+        "vy": 0.0,
+        "omega": 0.0,
+        "throttle": 0.0
+      },
+      "food": {
+        "x": 50.0,
+        "y": 40.0,
+        "radius": 8.0
+      },
+      "notes": "Custom test case created interactively",
+      "world_id": "test_world",
+      "obstacles": {
+        "circles": [],
+        "segments": []
+      }
+    },
+    {
+      "id": "upper_area",
+      "max_steps": 600,
+      "dt": null,
+      "agent_start": {
+        "x": 625.0,
+        "y": 130.0,
+        "theta": 0.0,
+        "vx": 0.0,
+        "vy": 0.0,
+        "omega": 0.0,
+        "throttle": 0.0
+      },
+      "food": {
+        "x": 75.0,
+        "y": 50.0,
+        "radius": 8.0
+      },
+      "notes": "Custom test case created interactively",
+      "world_id": "test_world",
+      "obstacles": {
+        "circles": [],
+        "segments": []
+      }
+    },
+    {
+      "id": "mid",
+      "max_steps": 600,
+      "dt": null,
+      "agent_start": {
+        "x": 315.0,
+        "y": 295.0,
+        "theta": 2.500000000000001,
+        "vx": 0.0,
+        "vy": 0.0,
+        "omega": 0.0,
+        "throttle": 0.0
+      },
+      "food": {
+        "x": 85.0,
+        "y": 80.0,
+        "radius": 8.0
+      },
+      "notes": "Custom test case created interactively",
+      "world_id": "test_world",
+      "obstacles": {
+        "circles": [],
+        "segments": []
+      }
+    },
+    {
+      "id": "lower",
+      "max_steps": 600,
+      "dt": null,
+      "agent_start": {
+        "x": 270.0,
+        "y": 670.0,
+        "theta": 0.0,
+        "vx": 0.0,
+        "vy": 0.0,
+        "omega": 0.0,
+        "throttle": 0.0
+      },
+      "food": {
+        "x": 105.0,
+        "y": 65.0,
+        "radius": 8.0
+      },
+      "notes": "Custom test case created interactively",
+      "world_id": "test_world",
+      "obstacles": {
+        "circles": [],
+        "segments": []
+      }
+    },
+    {
+      "id": "cave",
+      "max_steps": 600,
+      "dt": null,
+      "agent_start": {
+        "x": 665.0,
+        "y": 310.0,
+        "theta": -2.0000000000000004,
+        "vx": 0.0,
+        "vy": 0.0,
+        "omega": 0.0,
+        "throttle": 0.0
+      },
+      "food": {
+        "x": 60.0,
+        "y": 70.0,
+        "radius": 8.0
+      },
+      "notes": "Custom test case created interactively",
+      "world_id": "test_world",
+      "obstacles": {
+        "circles": [],
+        "segments": []
+      }
+    }
+  ]
+}

@@ -33,6 +33,15 @@ class TestCaseCreator:
     
     def __init__(self, config: SimulationConfig, suite_path: str = None):
         self.config = config
+        
+        # Convert suite name to proper file path if needed
+        if suite_path and not suite_path.endswith('.json'):
+            # If it's just a name, put it in the test_suites directory
+            if '/' not in suite_path and '\\' not in suite_path:
+                suite_path = f"data/test_suites/{suite_path}.json"
+            else:
+                suite_path = f"{suite_path}.json"
+        
         self.suite_path = suite_path
         
         # Load existing suite or create new one
