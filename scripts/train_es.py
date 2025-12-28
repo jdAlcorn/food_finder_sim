@@ -345,6 +345,10 @@ def main():
         )
         print(f"Saved final checkpoint: {checkpoint_path}")
     
+    finally:
+        # Always clean up the trainer's executor
+        trainer.shutdown()
+    
     # Final summary
     total_time = time.time() - start_time
     print(f"\nTraining completed!")

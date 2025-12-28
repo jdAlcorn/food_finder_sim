@@ -65,6 +65,16 @@ class EvolutionStrategiesTrainer:
             num_workers = max(1, mp.cpu_count() // 2)
         self.num_workers = num_workers
         
+        # Initialize persistent executor for multiprocessing
+        # Create once and reuse across all generations to avoid spawn overhead
+        self.executor = None
+        if self.num_workers > 1:
+            import time
+            start_time = time.time()
+            self.executor = ProcessPoolExecutor(max_workers=self.num_workers)
+            executor_time = time.time() - start_time
+            print(f"  Executor creation time: {executor_time:.3f}s")
+        
         # Initialize random state
         self.rng = np.random.RandomState(seed0)
         
@@ -83,6 +93,7 @@ class EvolutionStrategiesTrainer:
         print(f"  Antithetic sampling: {antithetic}")
         print(f"  Batched evaluation: Always enabled")
         print(f"  Eval batch size: {self.eval_batch_size}")
+        print(f"  Persistent executor: {'Yes' if self.executor else 'No (single-threaded)'}")
     
     def step(self, theta_flat: torch.Tensor, iteration: int) -> Tuple[torch.Tensor, Dict[str, Any], torch.Tensor, float]:
         """
@@ -156,7 +167,7 @@ class EvolutionStrategiesTrainer:
     
     def _evaluate_candidates_parallel(self, candidates: List[torch.Tensor], iteration: int) -> List[float]:
         """
-        Evaluate candidates in parallel using multiprocessing
+        Evaluate candidates in parallel using persistent multiprocessing executor
         
         PARALLELIZATION DESIGN:
         - WORKER LEVEL: Each candidate gets exactly one task (no duplication)
@@ -170,6 +181,9 @@ class EvolutionStrategiesTrainer:
         Returns:
             List of fitness values
         """
+        import time
+        eval_start_time = time.time()
+        
         # Prepare arguments for workers - ONE TASK PER CANDIDATE (no duplication)
         worker_args = []
         for i, candidate_theta in enumerate(candidates):
@@ -193,18 +207,23 @@ class EvolutionStrategiesTrainer:
             )
             worker_args.append(args)
         
-        # Evaluate in parallel
-        if self.num_workers == 1:
-            # Single-threaded for debugging
+        # Evaluate in parallel using persistent executor
+        if self.executor is None:
+            # Single-threaded for debugging or when num_workers=1
             results = [evaluate_candidate_worker(args) for args in worker_args]
         else:
-            # Multi-threaded
-            with ProcessPoolExecutor(max_workers=self.num_workers) as executor:
-                results = list(executor.map(evaluate_candidate_worker, worker_args))
+            # Multi-threaded using persistent executor (no spawn overhead)
+            results = list(self.executor.map(evaluate_candidate_worker, worker_args))
+        
+        eval_time = time.time() - eval_start_time
         
         # Sort results by candidate index and extract fitnesses
         results.sort(key=lambda x: x[0])
         fitnesses = [result[1] for result in results]
+        
+        # Log timing (only occasionally to avoid spam)
+        if iteration % 10 == 0:
+            print(f"  Generation {iteration} evaluation time: {eval_time:.3f}s")
         
         return fitnesses
     
@@ -214,6 +233,25 @@ class EvolutionStrategiesTrainer:
             self.sigma = kwargs['sigma']
         if 'alpha' in kwargs:
             self.alpha = kwargs['alpha']
+    
+    def shutdown(self):
+        """
+        Clean shutdown of the trainer, including executor cleanup
+        Should be called when training is complete or interrupted
+        """
+        if self.executor is not None:
+            print("Shutting down worker pool...")
+            self.executor.shutdown(wait=True, cancel_futures=False)
+            self.executor = None
+            print("Worker pool shutdown complete.")
+    
+    def __enter__(self):
+        """Context manager entry"""
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit - ensures cleanup"""
+        self.shutdown()
 
 
 def test_es_trainer():
@@ -226,8 +264,8 @@ def test_es_trainer():
     model_kwargs = {'input_dim': 388, 'hidden_dims': (64, 32), 'output_dim': 2}  # Smaller for testing
     sim_config = SimulationConfig()
     
-    # Create trainer
-    trainer = EvolutionStrategiesTrainer(
+    # Create trainer with context manager for proper cleanup
+    with EvolutionStrategiesTrainer(
         model_ctor=model_ctor,
         model_kwargs=model_kwargs,
         sim_config=sim_config,
@@ -238,22 +276,22 @@ def test_es_trainer():
         dt=1/60,
         num_workers=2,
         eval_seeds_per_candidate=1
-    )
-    
-    # Initialize parameters
-    model = model_ctor(**model_kwargs)
-    theta = get_flat_params(model)
-    
-    print(f"Testing ES with {theta.numel()} parameters")
-    
-    # Run a few steps
-    for i in range(3):
-        print(f"\nStep {i+1}:")
-        theta, stats, best_theta, best_fitness = trainer.step(theta, i)
+    ) as trainer:
         
-        print(f"  Mean fitness: {stats['fitness_mean']:.2f}")
-        print(f"  Best fitness: {stats['best_fitness']:.2f}")
-        print(f"  Gradient norm: {stats['gradient_norm']:.4f}")
+        # Initialize parameters
+        model = model_ctor(**model_kwargs)
+        theta = get_flat_params(model)
+        
+        print(f"Testing ES with {theta.numel()} parameters")
+        
+        # Run a few steps
+        for i in range(3):
+            print(f"\nStep {i+1}:")
+            theta, stats, best_theta, best_fitness = trainer.step(theta, i)
+            
+            print(f"  Mean fitness: {stats['fitness_mean']:.2f}")
+            print(f"  Best fitness: {stats['best_fitness']:.2f}")
+            print(f"  Gradient norm: {stats['gradient_norm']:.4f}")
     
     print("ES trainer test passed!")
 
