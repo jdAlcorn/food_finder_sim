@@ -6,6 +6,7 @@
     {
       "id": "center_to_corner_NE_facing_north",
       "max_steps": 700,
+      "dt": null,
       "agent_start": {
         "x": 320.0,
         "y": 400.0,
@@ -29,6 +30,7 @@
     {
       "id": "center_to_corner_NW_facing_east",
       "max_steps": 700,
+      "dt": null,
       "agent_start": {
         "x": 320.0,
         "y": 400.0,
@@ -52,6 +54,7 @@
     {
       "id": "center_to_corner_SE_facing_south",
       "max_steps": 700,
+      "dt": null,
       "agent_start": {
         "x": 320.0,
         "y": 400.0,
@@ -75,6 +78,7 @@
     {
       "id": "center_to_corner_SW_facing_west",
       "max_steps": 700,
+      "dt": null,
       "agent_start": {
         "x": 320.0,
         "y": 400.0,
@@ -98,6 +102,7 @@
     {
       "id": "food_behind_north",
       "max_steps": 500,
+      "dt": null,
       "agent_start": {
         "x": 320.0,
         "y": 400.0,
@@ -121,6 +126,7 @@
     {
       "id": "food_behind_east",
       "max_steps": 500,
+      "dt": null,
       "agent_start": {
         "x": 320.0,
         "y": 400.0,
@@ -144,6 +150,7 @@
     {
       "id": "diagonal_NE_to_SW",
       "max_steps": 600,
+      "dt": null,
       "agent_start": {
         "x": 200.0,
         "y": 200.0,
@@ -167,6 +174,7 @@
     {
       "id": "diagonal_NW_to_SE",
       "max_steps": 600,
+      "dt": null,
       "agent_start": {
         "x": 200.0,
         "y": 600.0,
@@ -190,6 +198,7 @@
     {
       "id": "near_wall_parallel_north",
       "max_steps": 400,
+      "dt": null,
       "agent_start": {
         "x": 100.0,
         "y": 80.0,
@@ -213,6 +222,7 @@
     {
       "id": "near_wall_parallel_west",
       "max_steps": 400,
+      "dt": null,
       "agent_start": {
         "x": 80.0,
         "y": 100.0,
@@ -236,6 +246,7 @@
     {
       "id": "medium_distance_angled",
       "max_steps": 450,
+      "dt": null,
       "agent_start": {
         "x": 300.0,
         "y": 300.0,
@@ -259,6 +270,7 @@
     {
       "id": "medium_distance_angled_2",
       "max_steps": 450,
+      "dt": null,
       "agent_start": {
         "x": 500.0,
         "y": 300.0,
@@ -282,6 +294,7 @@
     {
       "id": "edge_case_corner_approach",
       "max_steps": 500,
+      "dt": null,
       "agent_start": {
         "x": 600.0,
         "y": 600.0,
@@ -305,6 +318,7 @@
     {
       "id": "max_distance_test",
       "max_steps": 800,
+      "dt": null,
       "agent_start": {
         "x": 50.0,
         "y": 50.0,
@@ -324,6 +338,30 @@
         "segments": []
       },
       "notes": "Maximum distance corner to corner"
+    },
+    {
+      "id": "parallel_wall_1",
+      "max_steps": 600,
+      "dt": null,
+      "agent_start": {
+        "x": 420.0,
+        "y": 661.0,
+        "theta": 3.2000000000000015,
+        "vx": 0.0,
+        "vy": 0.0,
+        "omega": 0.0,
+        "throttle": 0.0
+      },
+      "food": {
+        "x": 742.0,
+        "y": 528.0,
+        "radius": 8.0
+      },
+      "obstacles": {
+        "circles": [],
+        "segments": []
+      },
+      "notes": "Custom test case created interactively"
     }
   ]
 }
