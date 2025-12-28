@@ -24,14 +24,6 @@ from src.policy.checkpoint import save_policy, load_policy
 from src.training.es.es_loop import EvolutionStrategiesTrainer
 from src.training.es.params import get_flat_params
 
-# Viewer imports (only imported if needed)
-viewer_available = False
-try:
-    from src.viz.live_viewer import ViewerConfig, start_viewer_process, notify_new_best, shutdown_viewer
-    viewer_available = True
-except ImportError:
-    pass
-
 
 def parse_args():
     """Parse command line arguments"""
@@ -305,7 +297,11 @@ def save_checkpoint(run_folder: str, args, generation, theta, best_theta, best_f
         
         # Notify viewer of new best agent
         if viewer_queue is not None:
-            notify_new_best(viewer_queue, best_path)
+            try:
+                from src.viz.live_viewer import notify_new_best
+                notify_new_best(viewer_queue, best_path)
+            except ImportError:
+                pass  # Viewer not available
         
         return best_path
     
@@ -371,22 +367,25 @@ def main():
     viewer_process = None
     viewer_queue = None
     if args.viewer:
-        if not viewer_available:
-            print("ERROR: Viewer requested but pygame/viewer dependencies not available")
+        try:
+            from src.viz.live_viewer import ViewerConfig, start_viewer_process, notify_new_best, shutdown_viewer
+            
+            print("Initializing live viewer...")
+            viewer_config = ViewerConfig(
+                episode_seconds=args.viewer_episode_seconds,
+                dt=args.viewer_dt,
+                fps=args.viewer_fps,
+                window_width=args.viewer_window_size[0],
+                window_height=args.viewer_window_size[1],
+                test_suite_path=args.test_suite or "data/test_suites/basic_v1.json"
+            )
+            
+            # Start viewer process (initially with no checkpoint)
+            viewer_process, viewer_queue = start_viewer_process(viewer_config)
+            
+        except ImportError as e:
+            print(f"ERROR: Viewer requested but dependencies not available: {e}")
             return
-        
-        print("Initializing live viewer...")
-        viewer_config = ViewerConfig(
-            episode_seconds=args.viewer_episode_seconds,
-            dt=args.viewer_dt,
-            fps=args.viewer_fps,
-            window_width=args.viewer_window_size[0],
-            window_height=args.viewer_window_size[1],
-            test_suite_path=args.test_suite or "data/test_suites/basic_v1.json"
-        )
-        
-        # Start viewer process (initially with no checkpoint)
-        viewer_process, viewer_queue = start_viewer_process(viewer_config)
     
     print()
     
@@ -398,7 +397,11 @@ def main():
         existing_best_path = os.path.join(run_folder, f"{args.save_prefix}_best.json")
         if os.path.exists(existing_best_path):
             print(f"Notifying viewer of existing best checkpoint: {existing_best_path}")
-            notify_new_best(viewer_queue, existing_best_path)
+            try:
+                from src.viz.live_viewer import notify_new_best
+                notify_new_best(viewer_queue, existing_best_path)
+            except ImportError:
+                pass  # Viewer not available
     
     # Setup logging
     csv_filename = args.csv_log or "training_log.csv"
@@ -492,7 +495,11 @@ def main():
         # Shutdown viewer if running
         if viewer_process is not None:
             print("Shutting down viewer...")
-            shutdown_viewer(viewer_queue)
+            try:
+                from src.viz.live_viewer import shutdown_viewer
+                shutdown_viewer(viewer_queue)
+            except ImportError:
+                pass  # Viewer not available
             viewer_process.join(timeout=5.0)  # Wait up to 5 seconds
             if viewer_process.is_alive():
                 print("Viewer did not shut down gracefully, terminating...")

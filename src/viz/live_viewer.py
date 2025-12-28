@@ -8,7 +8,7 @@ import os
 import sys
 import time
 import json
-import pygame
+import math
 import multiprocessing as mp
 from typing import Dict, Any, Optional
 from dataclasses import dataclass
@@ -16,11 +16,13 @@ from dataclasses import dataclass
 # Add src to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
+# Import pygame only when needed to avoid multiple initializations
+pygame = None
+
 from src.sim.core import SimulationConfig
 from src.sim.unified import SimulationSingle
 from src.policy.checkpoint import load_policy
 from src.eval.load_suite import load_suite
-from src.viz.pygame_single import run_simulation_gui
 
 
 @dataclass
@@ -119,8 +121,11 @@ def viewer_process(message_queue: mp.Queue, viewer_config: ViewerConfig,
     """
     print("Viewer: Starting live viewer process")
     
-    # Initialize pygame
+    # Import and initialize pygame only in this process
+    global pygame
+    import pygame
     pygame.init()
+    
     screen = pygame.display.set_mode((viewer_config.window_width, viewer_config.window_height))
     pygame.display.set_caption("ES Training - Live Best Agent Viewer")
     clock = pygame.time.Clock()
@@ -267,7 +272,7 @@ def viewer_process(message_queue: mp.Queue, viewer_config: ViewerConfig,
         
         # Draw food
         food_pos = sim_state['food_position']
-        pygame.draw.circle(screen, GREEN, (int(food_pos[0]), int(food_pos[1])), sim_config.food_radius)
+        pygame.draw.circle(screen, GREEN, (int(food_pos['x']), int(food_pos['y'])), sim_config.food_radius)
         
         # Draw agent
         agent_state = sim_state['agent_state']
@@ -285,14 +290,21 @@ def viewer_process(message_queue: mp.Queue, viewer_config: ViewerConfig,
         
         # Draw vision rays if enabled
         if show_vision:
-            vision_info = sim_state.get('vision_info', {})
-            distances = vision_info.get('distances', [])
-            angles = vision_info.get('angles', [])
+            distances = sim_state.get('vision_distances', [])
             
-            for distance, angle in zip(distances, angles):
+            # Calculate angles for vision rays
+            agent_theta = agent_state['theta']
+            fov_rad = math.radians(sim_config.fov_degrees)
+            start_angle = agent_theta - fov_rad / 2
+            
+            for i, distance in enumerate(distances):
                 if distance < sim_config.max_range:
-                    end_x = agent_x + distance * math.cos(angle)
-                    end_y = agent_y + distance * math.sin(angle)
+                    # Calculate angle for this ray
+                    angle_step = fov_rad / (len(distances) - 1) if len(distances) > 1 else 0
+                    ray_angle = start_angle + i * angle_step
+                    
+                    end_x = agent_x + distance * math.cos(ray_angle)
+                    end_y = agent_y + distance * math.sin(ray_angle)
                     pygame.draw.line(screen, (100, 100, 100), (agent_x, agent_y), (end_x, end_y), 1)
         
         # Draw UI info
