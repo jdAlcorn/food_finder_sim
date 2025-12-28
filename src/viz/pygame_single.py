@@ -240,14 +240,18 @@ def draw_ui(screen, font, sim, fps, show_vision, policy_name="Unknown"):
 
 
 def run_simulation_gui(policy: PolicyProtocol, config: SimulationConfig = None, 
-                      fps: int = 60, policy_name: str = "Unknown"):
+                      fps: int = 60, policy_name: str = "Unknown", sim=None):
     """Run the pygame GUI with given policy"""
     pygame.init()
     
-    # Create simulation
-    if config is None:
-        config = SimulationConfig()
-    sim = Simulation(config)
+    # Create or use provided simulation
+    if sim is None:
+        if config is None:
+            config = SimulationConfig()
+        sim = Simulation(config)
+    else:
+        # Use provided simulation and extract config
+        config = sim.config
     
     screen = pygame.display.set_mode((config.world_width, config.world_height))
     pygame.display.set_caption("2D Continuous Simulation with Ray-Cast Vision")

@@ -99,6 +99,54 @@ class BatchedSimulation:
         # Spawn food deterministically for each environment
         self._spawn_food_batch(seeds)
     
+    def reset_to_states(self, agent_states: List[Dict], food_states: List[Dict], 
+                       obstacle_states: List[Dict] = None):
+        """
+        Reset environments to explicit states (for test case evaluation)
+        
+        Args:
+            agent_states: List of agent state dicts with keys: x, y, theta, vx, vy, omega, throttle
+            food_states: List of food state dicts with keys: x, y
+            obstacle_states: List of obstacle state dicts (unused for now, but kept for API)
+        """
+        assert len(agent_states) == self.B, f"Expected {self.B} agent states, got {len(agent_states)}"
+        assert len(food_states) == self.B, f"Expected {self.B} food states, got {len(food_states)}"
+        
+        # Set agent states
+        for i, state in enumerate(agent_states):
+            self.agent_x[i] = state['x']
+            self.agent_y[i] = state['y']
+            self.agent_theta[i] = state['theta']
+            self.agent_vx[i] = state.get('vx', 0.0)
+            self.agent_vy[i] = state.get('vy', 0.0)
+            self.agent_omega[i] = state.get('omega', 0.0)
+            self.agent_throttle[i] = state.get('throttle', 0.0)
+        
+        # Set food states
+        for i, state in enumerate(food_states):
+            self.food_x[i] = state['x']
+            self.food_y[i] = state['y']
+        
+        # Reset episode tracking
+        self.time.fill(0.0)
+        self.step_count.fill(0)
+        self.food_collected.fill(0)
+        self.done.fill(False)
+        
+        # Set dummy initial seeds for respawn determinism (not used in test cases typically)
+        self.initial_seeds = np.arange(self.B, dtype=np.int64)
+        
+        # Update scene with food positions
+        food_positions = np.stack([self.food_x, self.food_y], axis=1)
+        self.scene.set_food_positions(food_positions)
+        
+        # TODO: Handle obstacle_states when obstacle support is added
+        if obstacle_states is not None:
+            # For now, just validate it's empty or None per environment
+            for i, obs_state in enumerate(obstacle_states):
+                if obs_state is not None and (obs_state.get('circles') or obs_state.get('segments')):
+                    raise NotImplementedError("Obstacle support not yet implemented in batched simulation")
+    
     def _spawn_food_batch(self, seeds: List[int]):
         """
         Spawn food for all environments using deterministic seeding

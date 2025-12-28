@@ -436,6 +436,49 @@ def evaluate_candidate_worker(args):
         return candidate_idx, -10000.0
 
 
+def evaluate_candidate_suite_worker(args):
+    """
+    Worker function for suite-based candidate evaluation
+    
+    Args:
+        args: Tuple of (candidate_idx, theta_flat, model_ctor, model_kwargs, sim_config, 
+                       test_suite, fitness_kwargs, generation)
+    
+    Returns:
+        Tuple of (candidate_idx, fitness)
+    """
+    (candidate_idx, theta_flat, model_ctor, model_kwargs, sim_config, 
+     test_suite, fitness_kwargs, generation) = args
+    
+    try:
+        # Import here to avoid circular imports
+        from ..eval.suite_evaluator import evaluate_candidate_on_suite
+        
+        # Extract parameters
+        batch_size = fitness_kwargs.get('batch_size', 32)
+        v_scale = fitness_kwargs.get('v_scale', 400.0)
+        omega_scale = fitness_kwargs.get('omega_scale', 10.0)
+        
+        # Evaluate on test suite
+        fitness_mean, per_case_scores, metadata = evaluate_candidate_on_suite(
+            theta_flat=theta_flat,
+            model_ctor=model_ctor,
+            model_kwargs=model_kwargs,
+            sim_config=sim_config,
+            suite=test_suite,
+            batch_size=batch_size,
+            device="cpu",  # Force CPU for multiprocessing compatibility
+            v_scale=v_scale,
+            omega_scale=omega_scale
+        )
+        
+        return candidate_idx, fitness_mean
+        
+    except Exception as e:
+        print(f"Suite worker {candidate_idx} failed: {e}")
+        return candidate_idx, -10000.0
+
+
 def test_rollout():
     """Test rollout evaluation"""
     from src.policy.models.mlp import SimpleMLP

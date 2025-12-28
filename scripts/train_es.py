@@ -92,6 +92,12 @@ def parse_args():
     parser.add_argument('--eval-batch-size', type=int, default=None,
                        help='Batch size for batched evaluation (default: same as eval-seeds)')
     
+    # Evaluation mode parameters
+    parser.add_argument('--eval-mode', type=str, choices=['suite', 'respawn'], default='suite',
+                       help='Evaluation mode: suite (deterministic test cases) or respawn (random food spawns)')
+    parser.add_argument('--test-suite', type=str, default=None,
+                       help='Path to test suite JSON file (default: data/test_suites/basic_v1.json)')
+    
     # Profiling parameters
     parser.add_argument('--profile-one-candidate-per-gen', action='store_true', default=False,
                        help='Enable lightweight profiling of one candidate per generation')
@@ -174,7 +180,9 @@ def initialize_training(args) -> tuple:
             'profile_max_steps': args.profile_max_steps,
             'profile_print_every_gen': args.profile_print_every_gen
         },
-        eval_batch_size=args.eval_batch_size
+        eval_batch_size=args.eval_batch_size,
+        eval_mode=args.eval_mode,
+        test_suite_path=args.test_suite
     )
     
     return trainer, theta, start_generation, best_fitness_so_far, sim_config, model_ctor, model_kwargs
@@ -265,6 +273,12 @@ def main():
     print(f"Hidden dims: {args.hidden_dims}")
     print(f"Episode length: {args.episode_length} steps")
     print(f"Workers: {args.workers or 'auto'}")
+    print(f"Evaluation mode: {args.eval_mode}")
+    if args.eval_mode == "suite":
+        suite_path = args.test_suite or "data/test_suites/basic_v1.json"
+        print(f"Test suite: {suite_path}")
+    else:
+        print(f"Seeds per candidate: {args.eval_seeds}")
     print(f"Batched evaluation: Always enabled")
     batch_size = args.eval_batch_size or args.eval_seeds
     print(f"Eval batch size: {batch_size}")

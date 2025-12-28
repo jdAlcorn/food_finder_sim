@@ -23,7 +23,8 @@ class EvolutionStrategiesTrainer:
                  alpha: float = 0.01, T: int = 600, dt: float = 1/60, seed0: int = 42,
                  num_workers: int = None, eval_seeds_per_candidate: int = 1, 
                  antithetic: bool = True, fitness_kwargs: Dict[str, Any] = None,
-                 eval_batch_size: int = None):
+                 eval_batch_size: int = None, eval_mode: str = "suite", 
+                 test_suite_path: str = None):
         """
         Initialize ES trainer
         
@@ -38,10 +39,12 @@ class EvolutionStrategiesTrainer:
             dt: Fixed timestep
             seed0: Base random seed
             num_workers: Number of worker processes (default: cpu_count//2)
-            eval_seeds_per_candidate: Number of seeds to evaluate per candidate
+            eval_seeds_per_candidate: Number of seeds to evaluate per candidate (respawn mode only)
             antithetic: Whether to use antithetic sampling
             fitness_kwargs: Additional arguments for fitness function
             eval_batch_size: Batch size for batched evaluation (default: eval_seeds_per_candidate)
+            eval_mode: Evaluation mode - "suite" or "respawn" (default: "suite")
+            test_suite_path: Path to test suite JSON file (required for suite mode)
         """
         self.model_ctor = model_ctor
         self.model_kwargs = model_kwargs
@@ -56,9 +59,25 @@ class EvolutionStrategiesTrainer:
         self.antithetic = antithetic
         self.fitness_kwargs = fitness_kwargs or {}
         self.eval_batch_size = eval_batch_size or eval_seeds_per_candidate
+        self.eval_mode = eval_mode
         
-        # Always use batched evaluation - add batch size to fitness kwargs
-        self.fitness_kwargs['batch_size'] = self.eval_batch_size
+        # Load test suite if using suite mode
+        if eval_mode == "suite":
+            if test_suite_path is None:
+                test_suite_path = "data/test_suites/basic_v1.json"
+            
+            from ..eval.load_suite import load_suite
+            self.test_suite = load_suite(test_suite_path)
+            print(f"Loaded test suite: {self.test_suite.suite_id} v{self.test_suite.version}")
+            print(f"  Test cases: {len(self.test_suite)}")
+            print(f"  Description: {self.test_suite.description}")
+            
+            # For suite mode, batch size is for test case batching
+            self.fitness_kwargs['batch_size'] = self.eval_batch_size
+        else:
+            # Respawn mode - always use batched evaluation
+            self.test_suite = None
+            self.fitness_kwargs['batch_size'] = self.eval_batch_size
         
         # Set up multiprocessing
         if num_workers is None:
@@ -89,7 +108,9 @@ class EvolutionStrategiesTrainer:
         print(f"  Sigma: {sigma}, Alpha: {alpha}")
         print(f"  Episode length: {T} steps, dt: {dt:.4f}")
         print(f"  Workers: {num_workers}")
-        print(f"  Seeds per candidate: {eval_seeds_per_candidate}")
+        print(f"  Evaluation mode: {eval_mode}")
+        if eval_mode == "respawn":
+            print(f"  Seeds per candidate: {eval_seeds_per_candidate}")
         print(f"  Antithetic sampling: {antithetic}")
         print(f"  Batched evaluation: Always enabled")
         print(f"  Eval batch size: {self.eval_batch_size}")
@@ -184,36 +205,61 @@ class EvolutionStrategiesTrainer:
         import time
         eval_start_time = time.time()
         
-        # Prepare arguments for workers - ONE TASK PER CANDIDATE (no duplication)
-        worker_args = []
-        for i, candidate_theta in enumerate(candidates):
-            # Generate unique base seed for this candidate and iteration
-            # Seed ranges: candidate_i uses [base_seed + i*10000, base_seed + i*10000 + num_seeds*1000)
-            # This ensures no seed overlap between candidates (10000 >> num_seeds*1000)
-            base_seed = self.seed0 + iteration * 100000 + i * 10000
+        if self.eval_mode == "suite":
+            # Suite-based evaluation
+            worker_args = []
+            for i, candidate_theta in enumerate(candidates):
+                args = (
+                    i,  # candidate_idx
+                    candidate_theta,
+                    self.model_ctor,
+                    self.model_kwargs,
+                    self.sim_config,
+                    self.test_suite,
+                    self.fitness_kwargs,  # Contains batch_size for test case batching
+                    iteration  # Add generation number for logging
+                )
+                worker_args.append(args)
             
-            args = (
-                i,  # candidate_idx
-                candidate_theta,
-                self.model_ctor,
-                self.model_kwargs,
-                self.sim_config,
-                base_seed,
-                self.eval_seeds_per_candidate,
-                self.T,
-                self.dt,
-                self.fitness_kwargs,  # Pass fitness parameters
-                iteration  # Add generation number for profiling
-            )
-            worker_args.append(args)
+            # Evaluate using suite worker function
+            if self.executor is None:
+                # Single-threaded
+                results = [evaluate_candidate_suite_worker(args) for args in worker_args]
+            else:
+                # Multi-threaded using persistent executor
+                results = list(self.executor.map(evaluate_candidate_suite_worker, worker_args))
         
-        # Evaluate in parallel using persistent executor
-        if self.executor is None:
-            # Single-threaded for debugging or when num_workers=1
-            results = [evaluate_candidate_worker(args) for args in worker_args]
         else:
-            # Multi-threaded using persistent executor (no spawn overhead)
-            results = list(self.executor.map(evaluate_candidate_worker, worker_args))
+            # Respawn-based evaluation (original method)
+            worker_args = []
+            for i, candidate_theta in enumerate(candidates):
+                # Generate unique base seed for this candidate and iteration
+                base_seed = self.seed0 + iteration * 100000 + i * 10000
+                
+                args = (
+                    i,  # candidate_idx
+                    candidate_theta,
+                    self.model_ctor,
+                    self.model_kwargs,
+                    self.sim_config,
+                    base_seed,
+                    self.eval_seeds_per_candidate,
+                    self.T,
+                    self.dt,
+                    self.fitness_kwargs,
+                    iteration
+                )
+                worker_args.append(args)
+            
+            # Evaluate using respawn worker function
+            if self.executor is None:
+                # Single-threaded
+                from .rollout import evaluate_candidate_worker
+                results = [evaluate_candidate_worker(args) for args in worker_args]
+            else:
+                # Multi-threaded using persistent executor
+                from .rollout import evaluate_candidate_worker
+                results = list(self.executor.map(evaluate_candidate_worker, worker_args))
         
         eval_time = time.time() - eval_start_time
         
@@ -223,7 +269,8 @@ class EvolutionStrategiesTrainer:
         
         # Log timing (only occasionally to avoid spam)
         if iteration % 10 == 0:
-            print(f"  Generation {iteration} evaluation time: {eval_time:.3f}s")
+            mode_info = f"suite ({len(self.test_suite)} cases)" if self.eval_mode == "suite" else f"respawn ({self.eval_seeds_per_candidate} seeds)"
+            print(f"  Generation {iteration} evaluation time: {eval_time:.3f}s ({mode_info})")
         
         return fitnesses
     
