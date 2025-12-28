@@ -1,107 +1,15 @@
 {
   "suite_id": "basic_v1",
-  "version": "1.0",
-  "description": "Basic test suite covering fundamental scenarios: center, corners, walls, and various agent orientations",
+  "version": "1.1",
+  "description": "Challenging deterministic test suite focusing on navigation scenarios where agents commonly fail by driving in circles. Center cases use left-of-center positioning to avoid right wall signals during circular motion.",
   "test_cases": [
     {
-      "id": "center_facing_north",
-      "max_steps": 300,
+      "id": "center_to_corner_NE_facing_north",
+      "max_steps": 700,
       "agent_start": {
-        "x": 400.0,
+        "x": 320.0,
         "y": 400.0,
         "theta": 1.5708,
-        "vx": 0.0,
-        "vy": 0.0,
-        "omega": 0.0,
-        "throttle": 0.0
-      },
-      "food": {
-        "x": 400.0,
-        "y": 200.0,
-        "radius": 8.0
-      },
-      "obstacles": {
-        "circles": [],
-        "segments": []
-      },
-      "notes": "Agent at center facing north, food directly ahead"
-    },
-    {
-      "id": "center_facing_south",
-      "max_steps": 300,
-      "agent_start": {
-        "x": 400.0,
-        "y": 400.0,
-        "theta": -1.5708,
-        "vx": 0.0,
-        "vy": 0.0,
-        "omega": 0.0,
-        "throttle": 0.0
-      },
-      "food": {
-        "x": 400.0,
-        "y": 600.0,
-        "radius": 8.0
-      },
-      "obstacles": {
-        "circles": [],
-        "segments": []
-      },
-      "notes": "Agent at center facing south, food directly ahead"
-    },
-    {
-      "id": "center_facing_east",
-      "max_steps": 300,
-      "agent_start": {
-        "x": 400.0,
-        "y": 400.0,
-        "theta": 0.0,
-        "vx": 0.0,
-        "vy": 0.0,
-        "omega": 0.0,
-        "throttle": 0.0
-      },
-      "food": {
-        "x": 600.0,
-        "y": 400.0,
-        "radius": 8.0
-      },
-      "obstacles": {
-        "circles": [],
-        "segments": []
-      },
-      "notes": "Agent at center facing east, food directly ahead"
-    },
-    {
-      "id": "center_facing_west",
-      "max_steps": 300,
-      "agent_start": {
-        "x": 400.0,
-        "y": 400.0,
-        "theta": 3.14159,
-        "vx": 0.0,
-        "vy": 0.0,
-        "omega": 0.0,
-        "throttle": 0.0
-      },
-      "food": {
-        "x": 200.0,
-        "y": 400.0,
-        "radius": 8.0
-      },
-      "obstacles": {
-        "circles": [],
-        "segments": []
-      },
-      "notes": "Agent at center facing west, food directly ahead"
-    },
-    {
-      "id": "corner_NE_facing_corner",
-      "max_steps": 400,
-      "agent_start": {
-        "x": 300.0,
-        "y": 300.0,
-        "theta": 0.7854,
         "vx": 0.0,
         "vy": 0.0,
         "omega": 0.0,
@@ -116,15 +24,15 @@
         "circles": [],
         "segments": []
       },
-      "notes": "Agent facing northeast corner, food near corner"
+      "notes": "Agent left of center facing north, food in NE corner - tests circular driving failure mode"
     },
     {
-      "id": "corner_NW_facing_corner",
-      "max_steps": 400,
+      "id": "center_to_corner_NW_facing_east",
+      "max_steps": 700,
       "agent_start": {
-        "x": 500.0,
-        "y": 300.0,
-        "theta": 2.3562,
+        "x": 320.0,
+        "y": 400.0,
+        "theta": 0.0,
         "vx": 0.0,
         "vy": 0.0,
         "omega": 0.0,
@@ -139,83 +47,14 @@
         "circles": [],
         "segments": []
       },
-      "notes": "Agent facing northwest corner, food near corner"
+      "notes": "Agent left of center facing east, food in NW corner - tests circular driving failure mode"
     },
     {
-      "id": "corner_SE_facing_corner",
-      "max_steps": 400,
+      "id": "center_to_corner_SE_facing_south",
+      "max_steps": 700,
       "agent_start": {
-        "x": 300.0,
-        "y": 500.0,
-        "theta": -0.7854,
-        "vx": 0.0,
-        "vy": 0.0,
-        "omega": 0.0,
-        "throttle": 0.0
-      },
-      "food": {
-        "x": 750.0,
-        "y": 750.0,
-        "radius": 8.0
-      },
-      "obstacles": {
-        "circles": [],
-        "segments": []
-      },
-      "notes": "Agent facing southeast corner, food near corner"
-    },
-    {
-      "id": "corner_SW_facing_corner",
-      "max_steps": 400,
-      "agent_start": {
-        "x": 500.0,
-        "y": 500.0,
-        "theta": -2.3562,
-        "vx": 0.0,
-        "vy": 0.0,
-        "omega": 0.0,
-        "throttle": 0.0
-      },
-      "food": {
-        "x": 50.0,
-        "y": 750.0,
-        "radius": 8.0
-      },
-      "obstacles": {
-        "circles": [],
-        "segments": []
-      },
-      "notes": "Agent facing southwest corner, food near corner"
-    },
-    {
-      "id": "wall_north_facing_wall",
-      "max_steps": 350,
-      "agent_start": {
-        "x": 400.0,
-        "y": 300.0,
-        "theta": 1.5708,
-        "vx": 0.0,
-        "vy": 0.0,
-        "omega": 0.0,
-        "throttle": 0.0
-      },
-      "food": {
-        "x": 400.0,
-        "y": 50.0,
-        "radius": 8.0
-      },
-      "obstacles": {
-        "circles": [],
-        "segments": []
-      },
-      "notes": "Agent facing north wall, food near north wall"
-    },
-    {
-      "id": "wall_south_facing_wall",
-      "max_steps": 350,
-      "agent_start": {
-        "x": 400.0,
-        "y": 500.0,
+        "x": 320.0,
+        "y": 400.0,
         "theta": -1.5708,
         "vx": 0.0,
         "vy": 0.0,
@@ -223,7 +62,7 @@
         "throttle": 0.0
       },
       "food": {
-        "x": 400.0,
+        "x": 750.0,
         "y": 750.0,
         "radius": 8.0
       },
@@ -231,36 +70,13 @@
         "circles": [],
         "segments": []
       },
-      "notes": "Agent facing south wall, food near south wall"
+      "notes": "Agent left of center facing south, food in SE corner - tests circular driving failure mode"
     },
     {
-      "id": "wall_east_facing_wall",
-      "max_steps": 350,
+      "id": "center_to_corner_SW_facing_west",
+      "max_steps": 700,
       "agent_start": {
-        "x": 500.0,
-        "y": 400.0,
-        "theta": 0.0,
-        "vx": 0.0,
-        "vy": 0.0,
-        "omega": 0.0,
-        "throttle": 0.0
-      },
-      "food": {
-        "x": 750.0,
-        "y": 400.0,
-        "radius": 8.0
-      },
-      "obstacles": {
-        "circles": [],
-        "segments": []
-      },
-      "notes": "Agent facing east wall, food near east wall"
-    },
-    {
-      "id": "wall_west_facing_wall",
-      "max_steps": 350,
-      "agent_start": {
-        "x": 300.0,
+        "x": 320.0,
         "y": 400.0,
         "theta": 3.14159,
         "vx": 0.0,
@@ -270,20 +86,20 @@
       },
       "food": {
         "x": 50.0,
-        "y": 400.0,
+        "y": 750.0,
         "radius": 8.0
       },
       "obstacles": {
         "circles": [],
         "segments": []
       },
-      "notes": "Agent facing west wall, food near west wall"
+      "notes": "Agent left of center facing west, food in SW corner - tests circular driving failure mode"
     },
     {
       "id": "food_behind_north",
       "max_steps": 500,
       "agent_start": {
-        "x": 400.0,
+        "x": 320.0,
         "y": 400.0,
         "theta": 1.5708,
         "vx": 0.0,
@@ -292,7 +108,7 @@
         "throttle": 0.0
       },
       "food": {
-        "x": 400.0,
+        "x": 320.0,
         "y": 600.0,
         "radius": 8.0
       },
@@ -300,36 +116,13 @@
         "circles": [],
         "segments": []
       },
-      "notes": "Agent facing north, food behind (south)"
-    },
-    {
-      "id": "food_behind_south",
-      "max_steps": 500,
-      "agent_start": {
-        "x": 400.0,
-        "y": 400.0,
-        "theta": -1.5708,
-        "vx": 0.0,
-        "vy": 0.0,
-        "omega": 0.0,
-        "throttle": 0.0
-      },
-      "food": {
-        "x": 400.0,
-        "y": 200.0,
-        "radius": 8.0
-      },
-      "obstacles": {
-        "circles": [],
-        "segments": []
-      },
-      "notes": "Agent facing south, food behind (north)"
+      "notes": "Agent left of center facing north, food behind (south)"
     },
     {
       "id": "food_behind_east",
       "max_steps": 500,
       "agent_start": {
-        "x": 400.0,
+        "x": 320.0,
         "y": 400.0,
         "theta": 0.0,
         "vx": 0.0,
@@ -338,7 +131,7 @@
         "throttle": 0.0
       },
       "food": {
-        "x": 200.0,
+        "x": 120.0,
         "y": 400.0,
         "radius": 8.0
       },
@@ -346,30 +139,7 @@
         "circles": [],
         "segments": []
       },
-      "notes": "Agent facing east, food behind (west)"
-    },
-    {
-      "id": "food_behind_west",
-      "max_steps": 500,
-      "agent_start": {
-        "x": 400.0,
-        "y": 400.0,
-        "theta": 3.14159,
-        "vx": 0.0,
-        "vy": 0.0,
-        "omega": 0.0,
-        "throttle": 0.0
-      },
-      "food": {
-        "x": 600.0,
-        "y": 400.0,
-        "radius": 8.0
-      },
-      "obstacles": {
-        "circles": [],
-        "segments": []
-      },
-      "notes": "Agent facing west, food behind (east)"
+      "notes": "Agent left of center facing east, food behind (west)"
     },
     {
       "id": "diagonal_NE_to_SW",
@@ -418,52 +188,6 @@
       "notes": "Long diagonal path from NW to SE"
     },
     {
-      "id": "close_90_degree_turn_left",
-      "max_steps": 250,
-      "agent_start": {
-        "x": 400.0,
-        "y": 400.0,
-        "theta": 0.0,
-        "vx": 0.0,
-        "vy": 0.0,
-        "omega": 0.0,
-        "throttle": 0.0
-      },
-      "food": {
-        "x": 400.0,
-        "y": 300.0,
-        "radius": 8.0
-      },
-      "obstacles": {
-        "circles": [],
-        "segments": []
-      },
-      "notes": "Agent facing east, food north (90 degree left turn)"
-    },
-    {
-      "id": "close_90_degree_turn_right",
-      "max_steps": 250,
-      "agent_start": {
-        "x": 400.0,
-        "y": 400.0,
-        "theta": 0.0,
-        "vx": 0.0,
-        "vy": 0.0,
-        "omega": 0.0,
-        "throttle": 0.0
-      },
-      "food": {
-        "x": 400.0,
-        "y": 500.0,
-        "radius": 8.0
-      },
-      "obstacles": {
-        "circles": [],
-        "segments": []
-      },
-      "notes": "Agent facing east, food south (90 degree right turn)"
-    },
-    {
       "id": "near_wall_parallel_north",
       "max_steps": 400,
       "agent_start": {
@@ -485,52 +209,6 @@
         "segments": []
       },
       "notes": "Agent near north wall, moving parallel to wall"
-    },
-    {
-      "id": "near_wall_parallel_south",
-      "max_steps": 400,
-      "agent_start": {
-        "x": 100.0,
-        "y": 720.0,
-        "theta": 0.0,
-        "vx": 0.0,
-        "vy": 0.0,
-        "omega": 0.0,
-        "throttle": 0.0
-      },
-      "food": {
-        "x": 600.0,
-        "y": 720.0,
-        "radius": 8.0
-      },
-      "obstacles": {
-        "circles": [],
-        "segments": []
-      },
-      "notes": "Agent near south wall, moving parallel to wall"
-    },
-    {
-      "id": "near_wall_parallel_east",
-      "max_steps": 400,
-      "agent_start": {
-        "x": 720.0,
-        "y": 100.0,
-        "theta": 1.5708,
-        "vx": 0.0,
-        "vy": 0.0,
-        "omega": 0.0,
-        "throttle": 0.0
-      },
-      "food": {
-        "x": 720.0,
-        "y": 600.0,
-        "radius": 8.0
-      },
-      "obstacles": {
-        "circles": [],
-        "segments": []
-      },
-      "notes": "Agent near east wall, moving parallel to wall"
     },
     {
       "id": "near_wall_parallel_west",
@@ -602,52 +280,6 @@
       "notes": "Medium distance at 120 degree angle"
     },
     {
-      "id": "very_close_forward",
-      "max_steps": 100,
-      "agent_start": {
-        "x": 400.0,
-        "y": 400.0,
-        "theta": 0.0,
-        "vx": 0.0,
-        "vy": 0.0,
-        "omega": 0.0,
-        "throttle": 0.0
-      },
-      "food": {
-        "x": 450.0,
-        "y": 400.0,
-        "radius": 8.0
-      },
-      "obstacles": {
-        "circles": [],
-        "segments": []
-      },
-      "notes": "Very close food directly ahead"
-    },
-    {
-      "id": "very_close_slight_angle",
-      "max_steps": 150,
-      "agent_start": {
-        "x": 400.0,
-        "y": 400.0,
-        "theta": 0.0,
-        "vx": 0.0,
-        "vy": 0.0,
-        "omega": 0.0,
-        "throttle": 0.0
-      },
-      "food": {
-        "x": 450.0,
-        "y": 420.0,
-        "radius": 8.0
-      },
-      "obstacles": {
-        "circles": [],
-        "segments": []
-      },
-      "notes": "Very close food at slight angle"
-    },
-    {
       "id": "edge_case_corner_approach",
       "max_steps": 500,
       "agent_start": {
@@ -669,75 +301,6 @@
         "segments": []
       },
       "notes": "Approach corner from inside, test wall collision handling"
-    },
-    {
-      "id": "starting_with_velocity",
-      "max_steps": 300,
-      "agent_start": {
-        "x": 300.0,
-        "y": 400.0,
-        "theta": 0.0,
-        "vx": 50.0,
-        "vy": 0.0,
-        "omega": 0.0,
-        "throttle": 0.0
-      },
-      "food": {
-        "x": 600.0,
-        "y": 400.0,
-        "radius": 8.0
-      },
-      "obstacles": {
-        "circles": [],
-        "segments": []
-      },
-      "notes": "Agent starts with initial velocity"
-    },
-    {
-      "id": "starting_with_angular_velocity",
-      "max_steps": 350,
-      "agent_start": {
-        "x": 400.0,
-        "y": 400.0,
-        "theta": 0.0,
-        "vx": 0.0,
-        "vy": 0.0,
-        "omega": 2.0,
-        "throttle": 0.0
-      },
-      "food": {
-        "x": 400.0,
-        "y": 300.0,
-        "radius": 8.0
-      },
-      "obstacles": {
-        "circles": [],
-        "segments": []
-      },
-      "notes": "Agent starts with angular velocity"
-    },
-    {
-      "id": "precision_test_tiny_adjustment",
-      "max_steps": 200,
-      "agent_start": {
-        "x": 400.0,
-        "y": 400.0,
-        "theta": 0.1,
-        "vx": 0.0,
-        "vy": 0.0,
-        "omega": 0.0,
-        "throttle": 0.0
-      },
-      "food": {
-        "x": 500.0,
-        "y": 405.0,
-        "radius": 8.0
-      },
-      "obstacles": {
-        "circles": [],
-        "segments": []
-      },
-      "notes": "Test precision with small angle adjustment needed"
     },
     {
       "id": "max_distance_test",
