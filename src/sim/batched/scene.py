@@ -23,7 +23,7 @@ class BatchedScene:
     """
     
     def __init__(self, batch_size: int, config: SimulationConfig, 
-                 ks_max: int = 20, kc_max: int = 10):
+                 ks_max: int = 50, kc_max: int = 20):
         """
         Initialize batched scene
         

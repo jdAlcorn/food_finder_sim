@@ -43,6 +43,7 @@ class WorldEditor:
                 print(f"Loaded existing world: {world_id}")
                 print(f"Description: {self.world.description}")
                 print(f"Rectangles: {len(self.world.geometry.rectangles)}")
+                    
             except Exception as e:
                 print(f"Error loading world '{world_id}': {e}")
                 print("Creating new world instead...")
@@ -62,9 +63,9 @@ class WorldEditor:
         self.WHITE = (255, 255, 255)
         self.RED = (255, 50, 50)
         self.GREEN = (50, 255, 50)
-        self.BLUE = (50, 150, 255)
+        self.BLUE = (100, 150, 255)  # Light blue for selected
         self.YELLOW = (255, 255, 0)
-        self.GRAY = (128, 128, 128)
+        self.GRAY = (160, 160, 160)  # Light gray for better visibility
         self.LIGHT_GRAY = (200, 200, 200)
         self.DARK_GRAY = (64, 64, 64)
         
@@ -193,6 +194,20 @@ class WorldEditor:
                 elif event.key == pygame.K_TAB:
                     # Test world in simulation
                     self.test_world()
+                
+                elif event.key == pygame.K_F1:
+                    # Debug: Add a simple test rectangle
+                    test_rect = RectangleObstacle(
+                        x=100, y=100, width=50, height=50, material_id=3
+                    )
+                    self.world.geometry.rectangles.append(test_rect)
+                    print(f"Debug: Added test rectangle. Total: {len(self.world.geometry.rectangles)}")
+                
+                elif event.key == pygame.K_F2:
+                    # Debug: Clear all rectangles
+                    self.world.geometry.rectangles.clear()
+                    self.selected_rect = None
+                    print(f"Debug: Cleared all rectangles")
             
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 1:  # Left click
@@ -252,8 +267,14 @@ class WorldEditor:
         """Handle right mouse click"""
         # Right click to create new rectangle at cursor
         x, y = self.snap_coords_to_grid(x, y)
+        
+        # Ensure rectangle fits within bounds
+        rect_size = 40
+        x = max(rect_size/2, min(self.config.world_width - rect_size/2, x))
+        y = max(rect_size/2, min(self.config.world_height - rect_size/2, y))
+        
         new_rect = RectangleObstacle(
-            x=x, y=y, width=40, height=40, material_id=3
+            x=x, y=y, width=rect_size, height=rect_size, material_id=3
         )
         self.world.geometry.rectangles.append(new_rect)
         self.selected_rect = len(self.world.geometry.rectangles) - 1
@@ -297,8 +318,17 @@ class WorldEditor:
         elif self.mode == "select" and self.selected_rect is not None:
             # Move selected rectangle
             rect = self.world.geometry.rectangles[self.selected_rect]
-            rect.x += dx
-            rect.y += dy
+            new_x = rect.x + dx
+            new_y = rect.y + dy
+            
+            # Constrain to world bounds
+            half_w = rect.width / 2
+            half_h = rect.height / 2
+            new_x = max(half_w, min(self.config.world_width - half_w, new_x))
+            new_y = max(half_h, min(self.config.world_height - half_h, new_y))
+            
+            rect.x = new_x
+            rect.y = new_y
             self.drag_start = (x, y)
         
         elif self.mode == "resize" and self.selected_rect is not None:
@@ -358,19 +388,29 @@ class WorldEditor:
         # Draw rectangles
         for i, rect in enumerate(self.world.geometry.rectangles):
             x1, y1, x2, y2 = self.get_rect_bounds(rect)
-            width = x2 - x1
-            height = y2 - y1
             
-            # Fill color
+            # Convert to pygame rect format
+            pygame_x = int(x1)
+            pygame_y = int(y1)
+            pygame_w = int(x2 - x1)
+            pygame_h = int(y2 - y1)
+            
+            # Skip invalid rectangles
+            if pygame_w <= 0 or pygame_h <= 0:
+                continue
+            
+            # Choose colors - make them more visible
             if i == self.selected_rect:
-                color = self.BLUE
-                outline_color = self.YELLOW
+                fill_color = self.BLUE  # Light blue
+                border_color = self.YELLOW  # Yellow
             else:
-                color = self.GRAY
-                outline_color = self.WHITE
+                fill_color = self.GRAY  # Light gray (more visible than dark gray)
+                border_color = self.WHITE  # White border
             
-            pygame.draw.rect(self.screen, color, (x1, y1, width, height))
-            pygame.draw.rect(self.screen, outline_color, (x1, y1, width, height), 2)
+            # Draw filled rectangle
+            pygame.draw.rect(self.screen, fill_color, (pygame_x, pygame_y, pygame_w, pygame_h))
+            # Draw border
+            pygame.draw.rect(self.screen, border_color, (pygame_x, pygame_y, pygame_w, pygame_h), 2)
             
             # Draw resize handles for selected rectangle
             if i == self.selected_rect:
@@ -402,6 +442,7 @@ class WorldEditor:
             "  Ctrl+S: Save world",
             "  TAB: Test world in simulation",
             "  G: Toggle grid, T: Toggle snap",
+            "  F1: Add test rectangle, F2: Clear all",
             "  ESC: Exit"
         ]
         
