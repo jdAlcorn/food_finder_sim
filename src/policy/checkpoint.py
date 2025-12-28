@@ -5,6 +5,7 @@ Checkpoint save/load functionality for policies
 
 import json
 import os
+import shutil
 from typing import Dict, Any, Tuple
 from .base import Policy
 from .manual import ManualPolicy
@@ -55,8 +56,8 @@ def save_policy(path: str, policy_name: str, policy_params: Dict[str, Any],
     with open(temp_path, 'w') as f:
         json.dump(checkpoint, f, indent=2)
     
-    # Atomic rename
-    os.rename(temp_path, path)
+    # Atomic rename - use shutil.move for cross-platform compatibility
+    shutil.move(temp_path, path)
     
     print(f"Saved policy checkpoint to {path}")
     if weights_path:

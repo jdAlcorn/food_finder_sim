@@ -316,7 +316,7 @@ def setup_csv_logging(run_folder: str, csv_filename: str):
     if csv_filename:
         csv_path = os.path.join(run_folder, csv_filename)
         
-        # Write header
+        # Write header (will overwrite existing file)
         with open(csv_path, 'w') as f:
             f.write('generation,fitness_mean,fitness_std,fitness_max,fitness_min,best_fitness,'
                    'gradient_norm,param_norm,sigma,alpha,elapsed_time\n')
