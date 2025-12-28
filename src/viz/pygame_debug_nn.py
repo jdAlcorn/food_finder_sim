@@ -11,6 +11,7 @@ import time
 from src.sim.core import Simulation, SimulationConfig
 from src.policy.manual import ManualPolicy
 from src.policy.nn_policy_stub import NeuralPolicyStub
+from src.viz.vision_rendering import draw_vision_from_simulation
 
 # Colors
 BLACK = (0, 0, 0)
@@ -87,72 +88,7 @@ def draw_vision(screen, sim, show_vision):
     if not show_vision:
         return
     
-    agent_state = sim.agent.get_state()
-    distances, hit_types, hit_wall_ids = sim.vision_system.compute_vision(sim.agent, sim.food)
-    
-    agent_x, agent_y = agent_state['x'], agent_state['y']
-    theta = agent_state['theta']
-    
-    fov_rad = math.radians(sim.config.fov_degrees)
-    
-    # Draw visible region polygon
-    angles = [theta + angle for angle in 
-              [fov_rad * (i / (sim.config.num_rays - 1) - 0.5) for i in range(sim.config.num_rays)]]
-    
-    hit_points = []
-    for distance, angle in zip(distances, angles):
-        hit_x = agent_x + min(distance, sim.config.max_range) * math.cos(angle)
-        hit_y = agent_y + min(distance, sim.config.max_range) * math.sin(angle)
-        hit_points.append((hit_x, hit_y))
-    
-    if len(hit_points) > 0:
-        # Create polygon vertices: agent position + hit points
-        polygon_points = [(agent_x, agent_y)]
-        for hit_x, hit_y in hit_points:
-            # Clamp to screen bounds for drawing
-            hit_x = max(0, min(sim.config.world_width, hit_x))
-            hit_y = max(0, min(sim.config.world_height, hit_y))
-            polygon_points.append((hit_x, hit_y))
-        
-        if len(polygon_points) > 2:
-            # Draw semi-transparent filled polygon
-            temp_surface = pygame.Surface((sim.config.world_width, sim.config.world_height))
-            temp_surface.set_alpha(30)
-            temp_surface.fill(BLACK)
-            pygame.draw.polygon(temp_surface, CYAN, polygon_points)
-            screen.blit(temp_surface, (0, 0))
-            
-            # Draw polygon outline
-            pygame.draw.polygon(screen, CYAN, polygon_points, 1)
-    
-    # Draw hit points with debugging info
-    for i, (distance, hit_type, wall_id, angle) in enumerate(zip(distances, hit_types, hit_wall_ids, angles)):
-        hit_x = agent_x + min(distance, sim.config.max_range) * math.cos(angle)
-        hit_y = agent_y + min(distance, sim.config.max_range) * math.sin(angle)
-        
-        if distance < sim.config.max_range:
-            pygame.draw.circle(screen, YELLOW, (int(hit_x), int(hit_y)), 2)
-        
-        # Draw every 8th ray for clarity
-        if i % 8 == 0:
-            color = (100, 100, 100)
-            draw_hit_x = max(0, min(sim.config.world_width, hit_x))
-            draw_hit_y = max(0, min(sim.config.world_height, hit_y))
-            pygame.draw.line(screen, color, (agent_x, agent_y), (draw_hit_x, draw_hit_y), 1)
-    
-    # Draw FOV cone outline (at the end)
-    cone_length = sim.config.max_range
-    left_angle = theta - fov_rad/2
-    right_angle = theta + fov_rad/2
-    
-    left_x = agent_x + cone_length * math.cos(left_angle)
-    left_y = agent_y + cone_length * math.sin(left_angle)
-    right_x = agent_x + cone_length * math.cos(right_angle)
-    right_y = agent_y + cone_length * math.sin(right_angle)
-    
-    # Draw FOV cone lines
-    pygame.draw.line(screen, YELLOW, (agent_x, agent_y), (left_x, left_y), 1)
-    pygame.draw.line(screen, YELLOW, (agent_x, agent_y), (right_x, right_y), 1)
+    draw_vision_from_simulation(screen, sim)
 
 
 def draw_ui(screen, font, sim, fps, show_vision, nn_obs_info):

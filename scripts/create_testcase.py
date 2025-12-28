@@ -24,6 +24,7 @@ except ImportError:
 from src.sim.core import SimulationConfig
 from src.eval.testcases import TestCase, AgentState, FoodState, Obstacles
 from src.eval.load_suite import load_suite, save_suite, TestSuite
+from src.viz.vision_rendering import draw_vision_cone, create_mock_vision_data
 
 
 class TestCaseCreator:
@@ -68,6 +69,7 @@ class TestCaseCreator:
         # State
         self.running = True
         self.mode = "agent"  # "agent" or "food"
+        self.show_vision = True  # Toggle vision cone display
         
         # Agent state (start in center)
         self.agent_x = config.world_width // 2
@@ -114,6 +116,10 @@ class TestCaseCreator:
                 elif event.key == pygame.K_r:
                     # Reset to defaults
                     self.reset_positions()
+                
+                elif event.key == pygame.K_v:
+                    # Toggle vision display
+                    self.show_vision = not self.show_vision
             
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 1:  # Left click
@@ -204,6 +210,26 @@ class TestCaseCreator:
         pygame.draw.line(self.screen, self.WHITE, 
                         (self.agent_x, self.agent_y), (end_x, end_y), 2)
         
+        # Draw vision cone if enabled
+        if self.show_vision:
+            distances, hit_types = create_mock_vision_data(
+                self.agent_x, self.agent_y, self.agent_theta,
+                self.food_x, self.food_y, self.config
+            )
+            
+            draw_vision_cone(
+                screen=self.screen,
+                agent_x=self.agent_x,
+                agent_y=self.agent_y,
+                agent_theta=self.agent_theta,
+                distances=distances,
+                hit_types=hit_types,
+                config=self.config,
+                show_rays=True,
+                show_polygon=True,
+                show_cone_outline=True
+            )
+        
         # Draw UI
         ui_lines = [
             f"Mode: {self.mode.upper()} (TAB to switch)",
@@ -212,12 +238,14 @@ class TestCaseCreator:
             f"Distance: {math.sqrt((self.agent_x - self.food_x)**2 + (self.agent_y - self.food_y)**2):.1f}",
             f"Suite: {os.path.basename(self.suite_path) if self.suite_path else 'Individual file'}",
             f"Case ID: {self.test_case_id}",
+            f"Vision: {'ON' if self.show_vision else 'OFF'} (V to toggle)",
             "",
             "Controls:",
             "  Arrow keys: Move selected object",
             "  A/D: Rotate agent (agent mode only)",
             "  Click: Move selected object to mouse",
             "  TAB: Switch between agent/food",
+            "  V: Toggle vision cone display",
             "  Ctrl+S: Save test case",
             "  R: Reset positions",
             "  ESC: Exit"

@@ -23,6 +23,7 @@ from src.sim.core import SimulationConfig
 from src.sim.unified import SimulationSingle
 from src.policy.checkpoint import load_policy
 from src.eval.load_suite import load_suite
+from src.viz.vision_rendering import draw_vision_from_sim_state
 
 
 @dataclass
@@ -297,78 +298,7 @@ def viewer_process(message_queue: mp.Queue, viewer_config: ViewerConfig,
         
         # Draw vision rays if enabled
         if show_vision:
-            distances = sim_state.get('vision_distances', [])
-            hit_types = sim_state.get('vision_hit_types', [])
-            
-            # Calculate angles for vision rays (same as pygame_single)
-            agent_theta = agent_state['theta']
-            fov_rad = math.radians(sim_config.fov_degrees)
-            angles = [agent_theta + angle for angle in 
-                     [fov_rad * (i / (sim_config.num_rays - 1) - 0.5) for i in range(sim_config.num_rays)]]
-            
-            # Draw visible region polygon
-            hit_points = []
-            for distance, angle in zip(distances, angles):
-                if distance is None:
-                    distance = sim_config.max_range
-                hit_x = agent_x + min(distance, sim_config.max_range) * math.cos(angle)
-                hit_y = agent_y + min(distance, sim_config.max_range) * math.sin(angle)
-                hit_points.append((hit_x, hit_y))
-            
-            if len(hit_points) > 0:
-                # Create polygon vertices: agent position + hit points
-                polygon_points = [(agent_x, agent_y)]
-                for hit_x, hit_y in hit_points:
-                    # Clamp to screen bounds for drawing
-                    hit_x = max(0, min(sim_config.world_width, hit_x))
-                    hit_y = max(0, min(sim_config.world_height, hit_y))
-                    polygon_points.append((hit_x, hit_y))
-                
-                if len(polygon_points) > 2:
-                    # Draw semi-transparent filled polygon
-                    temp_surface = pygame.Surface((sim_config.world_width, sim_config.world_height))
-                    temp_surface.set_alpha(30)
-                    temp_surface.fill(BLACK)
-                    pygame.draw.polygon(temp_surface, (0, 255, 255), polygon_points)  # CYAN
-                    screen.blit(temp_surface, (0, 0))
-                    
-                    # Draw polygon outline
-                    pygame.draw.polygon(screen, (0, 255, 255), polygon_points, 1)  # CYAN
-            
-            # Draw hit points and rays
-            for i, (distance, hit_type, angle) in enumerate(zip(distances, hit_types, angles)):
-                # Handle None distances
-                if distance is None:
-                    distance = sim_config.max_range
-                    
-                hit_x = agent_x + min(distance, sim_config.max_range) * math.cos(angle)
-                hit_y = agent_y + min(distance, sim_config.max_range) * math.sin(angle)
-                
-                if distance < sim_config.max_range:
-                    # Draw hit point
-                    pygame.draw.circle(screen, (255, 255, 0), (int(hit_x), int(hit_y)), 2)  # YELLOW
-                
-                # Draw every 8th ray for clarity
-                if i % 8 == 0:
-                    color = (100, 100, 100)
-                    # Clamp ray endpoint for drawing
-                    draw_hit_x = max(0, min(sim_config.world_width, hit_x))
-                    draw_hit_y = max(0, min(sim_config.world_height, hit_y))
-                    pygame.draw.line(screen, color, (agent_x, agent_y), (draw_hit_x, draw_hit_y), 1)
-            
-            # Draw FOV cone outline
-            cone_length = sim_config.max_range
-            left_angle = agent_theta - fov_rad/2
-            right_angle = agent_theta + fov_rad/2
-            
-            left_x = agent_x + cone_length * math.cos(left_angle)
-            left_y = agent_y + cone_length * math.sin(left_angle)
-            right_x = agent_x + cone_length * math.cos(right_angle)
-            right_y = agent_y + cone_length * math.sin(right_angle)
-            
-            # Draw FOV cone lines
-            pygame.draw.line(screen, (255, 255, 0), (agent_x, agent_y), (left_x, left_y), 1)  # YELLOW
-            pygame.draw.line(screen, (255, 255, 0), (agent_x, agent_y), (right_x, right_y), 1)  # YELLOW
+            draw_vision_from_sim_state(screen, sim_state, sim_config)
         
         # Draw UI info
         info_lines = [
