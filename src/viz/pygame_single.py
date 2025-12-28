@@ -8,7 +8,7 @@ import pygame
 import math
 import sys
 from typing import Protocol
-from src.sim.core import Simulation, SimulationConfig
+from src.sim import Simulation, SimulationConfig
 
 # Colors
 BLACK = (0, 0, 0)
@@ -96,8 +96,11 @@ def draw_vision(screen, sim, show_vision):
     if not show_vision:
         return
     
-    agent_state = sim.agent.get_state()
-    distances, hit_types, hit_wall_ids = sim.vision_system.compute_vision(sim.agent, sim.food)
+    sim_state = sim.get_state()
+    agent_state = sim_state['agent_state']
+    distances = sim_state['vision_distances']
+    hit_types = sim_state['vision_hit_types']
+    hit_wall_ids = sim_state['vision_hit_wall_ids']
     
     agent_x, agent_y = agent_state['x'], agent_state['y']
     theta = agent_state['theta']
@@ -110,6 +113,9 @@ def draw_vision(screen, sim, show_vision):
     
     hit_points = []
     for distance, angle in zip(distances, angles):
+        # Handle None distances (treat as max range)
+        if distance is None:
+            distance = sim.config.max_range
         hit_x = agent_x + min(distance, sim.config.max_range) * math.cos(angle)
         hit_y = agent_y + min(distance, sim.config.max_range) * math.sin(angle)
         hit_points.append((hit_x, hit_y))
@@ -184,13 +190,16 @@ def draw_vision(screen, sim, show_vision):
 
 def draw_ui(screen, font, sim, fps, show_vision, policy_name="Unknown"):
     """Draw UI information"""
-    agent_state = sim.agent.get_state()
+    sim_state = sim.get_state()
+    agent_state = sim_state['agent_state']
     
     # Agent info
     throttle_text = font.render(f"Throttle: {agent_state['throttle']:.2f}", True, WHITE)
     screen.blit(throttle_text, (10, 10))
     
-    speed_text = font.render(f"Speed: {agent_state['speed']:.1f}", True, WHITE)
+    # Calculate speed from velocity components
+    speed = math.sqrt(agent_state['vx']**2 + agent_state['vy']**2)
+    speed_text = font.render(f"Speed: {speed:.1f}", True, WHITE)
     screen.blit(speed_text, (10, 35))
     
     fps_text = font.render(f"FPS: {fps:.1f}", True, WHITE)
@@ -206,7 +215,7 @@ def draw_ui(screen, font, sim, fps, show_vision, policy_name="Unknown"):
     vision_text = font.render(f"Vision: {'ON' if show_vision else 'OFF'}", True, WHITE)
     screen.blit(vision_text, (10, 135))
     
-    food_text = font.render(f"Food collected: {sim.food_collected}", True, WHITE)
+    food_text = font.render(f"Food collected: {sim_state['food_collected']}", True, WHITE)
     screen.blit(food_text, (10, 160))
     
     policy_text = font.render(f"Policy: {policy_name}", True, WHITE)

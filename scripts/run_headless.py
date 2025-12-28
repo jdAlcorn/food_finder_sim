@@ -12,7 +12,7 @@ import argparse
 # Add src to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from src.sim.core import Simulation, SimulationConfig
+from src.sim import Simulation, SimulationConfig
 from src.policy.manual import ManualPolicy
 from src.policy.scripted import ScriptedPolicy
 from src.policy.nn_policy_stub import NeuralPolicyStub

@@ -7,7 +7,7 @@ import pygame
 import math
 import sys
 from typing import List, Type, Optional
-from src.sim.core import Simulation, SimulationConfig
+from src.sim import Simulation, SimulationConfig
 from src.policy.base import Policy
 
 # Colors

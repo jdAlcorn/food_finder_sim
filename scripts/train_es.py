@@ -88,9 +88,7 @@ def parse_args():
     parser.add_argument('--no-antithetic', dest='antithetic', action='store_false',
                        help='Disable antithetic sampling')
     
-    # Batched evaluation parameters
-    parser.add_argument('--use-batched-eval', action='store_true', default=False,
-                       help='Use batched simulation for faster evaluation')
+    # Batched evaluation parameters (always enabled now)
     parser.add_argument('--eval-batch-size', type=int, default=None,
                        help='Batch size for batched evaluation (default: same as eval-seeds)')
     
@@ -176,7 +174,6 @@ def initialize_training(args) -> tuple:
             'profile_max_steps': args.profile_max_steps,
             'profile_print_every_gen': args.profile_print_every_gen
         },
-        use_batched_eval=args.use_batched_eval,
         eval_batch_size=args.eval_batch_size
     )
     
@@ -268,10 +265,9 @@ def main():
     print(f"Hidden dims: {args.hidden_dims}")
     print(f"Episode length: {args.episode_length} steps")
     print(f"Workers: {args.workers or 'auto'}")
-    print(f"Batched evaluation: {args.use_batched_eval}")
-    if args.use_batched_eval:
-        batch_size = args.eval_batch_size or args.eval_seeds
-        print(f"Eval batch size: {batch_size}")
+    print(f"Batched evaluation: Always enabled")
+    batch_size = args.eval_batch_size or args.eval_seeds
+    print(f"Eval batch size: {batch_size}")
     print(f"Output dir: {args.output_dir}")
     print()
     

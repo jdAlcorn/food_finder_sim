@@ -9,9 +9,9 @@ import numpy as np
 import math
 import time
 from typing import Dict, Any, Callable, List
-from src.sim.core import Simulation, SimulationConfig
+from src.sim.core import SimulationConfig
 from src.sim.batched import BatchedSimulation
-from src.policy.obs import build_observation
+from src.sim.batched.obs import build_obs_batch
 from .params import set_flat_params
 
 
@@ -128,133 +128,65 @@ def rollout_fitness(theta_flat: torch.Tensor, model_ctor: Callable, model_kwargs
                    omega_scale: float = 10.0, food_reward_multiplier: float = 1000.0,
                    proximity_reward_scale: float = 1.0) -> float:
     """
-    Evaluate fitness of a parameter vector through simulation rollout
+    DEPRECATED: Use evaluate_multiple_seeds_batched instead
     
-    Args:
-        theta_flat: Flattened model parameters
-        model_ctor: Model constructor function
-        model_kwargs: Model constructor arguments
-        sim_config: Simulation configuration
-        seed: Random seed for deterministic evaluation
-        T: Number of simulation steps
-        dt: Fixed timestep
-        max_range: Maximum vision range for fitness calculation
-        v_scale: Velocity normalization scale
-        omega_scale: Angular velocity normalization scale
-        food_reward_multiplier: Points awarded per food collected
-        proximity_reward_scale: Scale factor for proximity reward
-        
-    Returns:
-        Fitness value (higher is better)
+    Evaluate fitness of a parameter vector through simulation rollout
     """
-    try:
-        # Create model and load parameters
-        model = model_ctor(**model_kwargs)
-        model.eval()
-        
-        # Load flattened parameters into model
-        set_flat_params(model, theta_flat)
-        
-        # Create simulation
-        sim = Simulation(sim_config, seed=seed)
-        
-        # Track fitness components
-        distances_to_food = []
-        food_count = 0
-        
-        # Run episode
-        with torch.no_grad():
-            for step in range(T):
-                # Get current state
-                sim_state = sim.get_state()
-                
-                # Build observation
-                obs = build_observation(sim_state, v_scale, omega_scale)
-                
-                # Convert to tensor and run model
-                obs_tensor = torch.tensor(obs, dtype=torch.float32).unsqueeze(0)
-                steer_raw, throttle_raw = model(obs_tensor)
-                
-                # Extract actions (activations already applied in model)
-                steer = float(steer_raw.item())
-                throttle = float(throttle_raw.item())
-                
-                # Safety clamps (should be redundant)
-                steer = np.clip(steer, -1.0, 1.0)
-                throttle = np.clip(throttle, 0.0, 1.0)
-                
-                # Step simulation
-                action = {'steer': steer, 'throttle': throttle}
-                step_info = sim.step(dt, action)
-                
-                # Track distance to food (current food position)
-                agent_pos = (step_info['agent_state']['x'], step_info['agent_state']['y'])
-                food_pos = (step_info['food_position']['x'], step_info['food_position']['y'])
-                dist_to_food = math.sqrt((agent_pos[0] - food_pos[0])**2 + (agent_pos[1] - food_pos[1])**2)
-                distances_to_food.append(dist_to_food)
-                
-                # Count food collected
-                if step_info['food_collected_this_step']:
-                    food_count += 1
-        
-        # Calculate fitness components
-        final_distance = distances_to_food[-1] if distances_to_food else max_range
-        
-        # Fitness components (food count heavily weighted)
-        food_reward = food_count * food_reward_multiplier  # Points per food collected
-        proximity_reward = max(0, max_range - final_distance) * proximity_reward_scale  # Reward for being close at end
-        step_penalty = -0.001 * T  # Small penalty for episode length
-        
-        fitness = food_reward + proximity_reward + step_penalty
-        
-        return float(fitness)
-        
-    except Exception as e:
-        # Return very low fitness for failed rollouts
-        print(f"Rollout failed with error: {e}")
-        return -10000.0
+    import warnings
+    warnings.warn(
+        "rollout_fitness is deprecated. Use evaluate_multiple_seeds_batched with num_seeds=1",
+        DeprecationWarning,
+        stacklevel=2
+    )
+    
+    # Redirect to batched version with single seed
+    fitnesses = evaluate_multiple_seeds_batched(
+        theta_flat=theta_flat,
+        model_ctor=model_ctor,
+        model_kwargs=model_kwargs,
+        sim_config=sim_config,
+        base_seed=seed,
+        num_seeds=1,
+        T=T,
+        dt=dt,
+        batch_size=1,
+        food_reward_multiplier=food_reward_multiplier,
+        proximity_reward_scale=proximity_reward_scale
+    )
+    
+    return fitnesses[0]
 
 
 def evaluate_multiple_seeds(theta_flat: torch.Tensor, model_ctor: Callable, model_kwargs: Dict[str, Any],
                            sim_config: SimulationConfig, base_seed: int, num_seeds: int, T: int, dt: float,
                            **kwargs) -> float:
     """
+    DEPRECATED: Use evaluate_multiple_seeds_batched instead
+    
     Evaluate fitness across multiple random seeds and return average
-    
-    Args:
-        theta_flat: Flattened model parameters
-        model_ctor: Model constructor function
-        model_kwargs: Model constructor arguments
-        sim_config: Simulation configuration
-        base_seed: Base seed for deterministic seed generation
-        num_seeds: Number of seeds to evaluate
-        T: Number of simulation steps per episode
-        dt: Fixed timestep
-        **kwargs: Additional arguments for rollout_fitness
-        
-    Returns:
-        Average fitness across all seeds
     """
-    fitnesses = []
+    import warnings
+    warnings.warn(
+        "evaluate_multiple_seeds is deprecated. Use evaluate_multiple_seeds_batched",
+        DeprecationWarning,
+        stacklevel=2
+    )
     
-    for i in range(num_seeds):
-        # Generate deterministic seed
-        seed = base_seed + i * 1000  # Spread seeds apart
-        
-        fitness = rollout_fitness(
-            theta_flat=theta_flat,
-            model_ctor=model_ctor,
-            model_kwargs=model_kwargs,
-            sim_config=sim_config,
-            seed=seed,
-            T=T,
-            dt=dt,
-            **kwargs
-        )
-        
-        fitnesses.append(fitness)
+    # Redirect to batched version
+    fitnesses = evaluate_multiple_seeds_batched(
+        theta_flat=theta_flat,
+        model_ctor=model_ctor,
+        model_kwargs=model_kwargs,
+        sim_config=sim_config,
+        base_seed=base_seed,
+        num_seeds=num_seeds,
+        T=T,
+        dt=dt,
+        batch_size=num_seeds,  # Batch all seeds together
+        **kwargs
+    )
     
-    return float(np.mean(fitnesses))
+    return sum(fitnesses) / len(fitnesses)
 
 
 def evaluate_multiple_seeds_batched(theta_flat: torch.Tensor, model_ctor: Callable, model_kwargs: Dict[str, Any],
@@ -476,36 +408,22 @@ def evaluate_candidate_worker(args):
             profiler = LightweightProfiler(enabled=True)
             profiler.max_steps = kwargs.get('profile_max_steps', 500)
         
-        # Check if batched evaluation is requested
-        use_batched = kwargs.get('use_batched', False)
-        batch_size = kwargs.get('batch_size', None)
+        # Always use batched evaluation (unified approach)
+        batch_size = kwargs.get('batch_size', num_seeds)  # Default to num_seeds for optimal batching
         
-        if use_batched:
-            fitness = evaluate_multiple_seeds_batched(
-                theta_flat=theta_flat,
-                model_ctor=model_ctor,
-                model_kwargs=model_kwargs,
-                sim_config=sim_config,
-                base_seed=candidate_base_seed,
-                num_seeds=num_seeds,
-                T=T,
-                dt=dt,
-                batch_size=batch_size,
-                profiler=profiler,
-                **{k: v for k, v in kwargs.items() if k not in ['use_batched', 'batch_size', 'profiler', 'profile_enabled', 'profile_candidate_idx', 'profile_max_steps', 'profile_print_every_gen']}
-            )
-        else:
-            fitness = evaluate_multiple_seeds(
-                theta_flat=theta_flat,
-                model_ctor=model_ctor,
-                model_kwargs=model_kwargs,
-                sim_config=sim_config,
-                base_seed=candidate_base_seed,
-                num_seeds=num_seeds,
-                T=T,
-                dt=dt,
-                **{k: v for k, v in kwargs.items() if k not in ['use_batched', 'batch_size', 'profiler', 'profile_enabled', 'profile_candidate_idx', 'profile_max_steps', 'profile_print_every_gen']}
-            )
+        fitness = evaluate_multiple_seeds_batched(
+            theta_flat=theta_flat,
+            model_ctor=model_ctor,
+            model_kwargs=model_kwargs,
+            sim_config=sim_config,
+            base_seed=candidate_base_seed,
+            num_seeds=num_seeds,
+            T=T,
+            dt=dt,
+            batch_size=batch_size,
+            profiler=profiler,
+            **{k: v for k, v in kwargs.items() if k not in ['batch_size', 'profiler', 'profile_enabled', 'profile_candidate_idx', 'profile_max_steps', 'profile_print_every_gen']}
+        )
         
         # Print profiling summary if enabled
         if profiler and profiler.enabled:
