@@ -368,23 +368,24 @@ def run_debug_nn_visualization(config: SimulationConfig = None, fps: int = 60):
         # Draw vision system
         draw_vision(screen, sim, show_vision)
         
-        # Draw depth strip
-        depth_strip = build_depth_strip(step_info['vision_distances'], 
-                                      step_info['vision_hit_types'],
-                                      step_info['vision_hit_wall_ids'], 
-                                      config)
-        
-        strip_x = 10
-        strip_y = config.world_height - 60 - 10
-        scaled_strip = pygame.transform.scale(depth_strip, (config.num_rays * 3, 60))
-        screen.blit(scaled_strip, (strip_x, strip_y))
-        
-        # Draw strip border
-        pygame.draw.rect(screen, WHITE, (strip_x - 1, strip_y - 1, config.num_rays * 3 + 2, 62), 1)
-        
-        # Strip label
-        strip_label = font.render("LiDAR Depth Strip", True, WHITE)
-        screen.blit(strip_label, (strip_x, strip_y - 25))
+        # Draw depth strip (only when vision is enabled)
+        if show_vision:
+            depth_strip = build_depth_strip(step_info['vision_distances'], 
+                                          step_info['vision_hit_types'],
+                                          step_info['vision_hit_wall_ids'], 
+                                          config)
+            
+            strip_x = 10
+            strip_y = config.world_height - 60 - 10
+            scaled_strip = pygame.transform.scale(depth_strip, (config.num_rays * 3, 60))
+            screen.blit(scaled_strip, (strip_x, strip_y))
+            
+            # Draw strip border
+            pygame.draw.rect(screen, WHITE, (strip_x - 1, strip_y - 1, config.num_rays * 3 + 2, 62), 1)
+            
+            # Strip label
+            strip_label = font.render("LiDAR Depth Strip", True, WHITE)
+            screen.blit(strip_label, (strip_x, strip_y - 25))
         
         # Draw UI with NN observation info
         draw_ui(screen, font, sim, clock.get_fps(), show_vision, nn_obs_info)
