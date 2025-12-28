@@ -138,6 +138,8 @@ class SimulationSingle:
                 hit_types.append('wall')
             elif material == MATERIAL_FOOD:
                 hit_types.append('food')
+            elif material >= 3:  # Obstacle materials (3+) should be treated as walls
+                hit_types.append('wall')
             else:
                 hit_types.append(None)
         

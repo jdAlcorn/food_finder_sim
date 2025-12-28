@@ -73,8 +73,8 @@ def extract_vision_features_batch(distances: np.ndarray, materials: np.ndarray,
     # Vision food: binary indicator for food hits
     vision_food = (materials == MATERIAL_FOOD).astype(np.float32)
     
-    # Vision wall: binary indicator for wall hits
-    vision_wall = (materials == MATERIAL_WALL).astype(np.float32)
+    # Vision wall: binary indicator for wall hits (including obstacles)
+    vision_wall = ((materials == MATERIAL_WALL) | (materials >= 3)).astype(np.float32)
     
     return vision_close, vision_food, vision_wall
 
