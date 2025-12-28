@@ -127,13 +127,17 @@ class BatchedRaycaster:
         eps = 1e-10
         valid_a = np.abs(a) > eps
         
+        # Safe division: replace small values of 'a' with 1.0 to avoid warnings
+        # The result will be ignored anyway due to valid_a mask
+        a_safe = np.where(valid_a, a, 1.0)
+        
         # s = (h × seg_vec) / a  (parameter along ray)
         # t = (h × ray_dir) / a  (parameter along segment)
         h_cross_seg = h_vec[..., 0] * seg_vec[..., 1] - h_vec[..., 1] * seg_vec[..., 0]  # [B, R, Ks]
         h_cross_ray = h_vec[..., 0] * ray_dirs_exp[..., 1] - h_vec[..., 1] * ray_dirs_exp[..., 0]  # [B, R, Ks]
         
-        s = np.where(valid_a, h_cross_seg / a, np.inf)
-        t = np.where(valid_a, h_cross_ray / a, np.inf)
+        s = np.where(valid_a, h_cross_seg / a_safe, np.inf)
+        t = np.where(valid_a, h_cross_ray / a_safe, np.inf)
         
         # Valid intersection conditions:
         # s > eps (positive distance along ray)
@@ -188,18 +192,24 @@ class BatchedRaycaster:
         # Discriminant
         discriminant = b * b - 4 * a * c  # [B, R, Kc]
         
-        # Valid intersections have non-negative discriminant
+        # Valid intersections have non-negative discriminant and non-zero 'a'
+        eps = 1e-10
+        valid_a = np.abs(a) > eps
         valid_discriminant = discriminant >= 0
+        valid_intersection = valid_a & valid_discriminant
         
-        # Compute intersection parameters (only for valid discriminants)
+        # Safe division: replace small values of 'a' with 1.0 to avoid warnings
+        a_safe = np.where(valid_a, a, 1.0)
+        
+        # Compute intersection parameters (only for valid cases)
         sqrt_discriminant = np.sqrt(np.maximum(discriminant, 0))  # Clamp to avoid sqrt of negative
-        t1 = (-b - sqrt_discriminant) / (2 * a)
-        t2 = (-b + sqrt_discriminant) / (2 * a)
+        t1 = np.where(valid_intersection, (-b - sqrt_discriminant) / (2 * a_safe), np.inf)
+        t2 = np.where(valid_intersection, (-b + sqrt_discriminant) / (2 * a_safe), np.inf)
         
         # Choose nearest positive intersection
-        eps = 1e-6
-        t1_valid = (t1 > eps) & valid_discriminant
-        t2_valid = (t2 > eps) & valid_discriminant
+        ray_eps = 1e-6
+        t1_valid = (t1 > ray_eps) & valid_intersection
+        t2_valid = (t2 > ray_eps) & valid_intersection
         
         # Use t1 if valid, otherwise t2 if valid, otherwise inf
         t = np.where(t1_valid, t1, np.where(t2_valid, t2, np.inf))
