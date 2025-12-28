@@ -96,6 +96,10 @@ class TestCaseCreator:
         self.available_worlds = list_available_worlds()
         self.current_world_idx = 0  # Index into available_worlds (0 = default_empty)
         
+        # World geometry cache
+        self.current_world = None
+        self.world_obstacles = []  # List of obstacle shapes for rendering
+        
         # Movement speed
         self.move_speed = 5.0
         self.rotation_speed = 0.1
@@ -131,6 +135,7 @@ class TestCaseCreator:
                     # Cycle through available worlds
                     self.current_world_idx = (self.current_world_idx + 1) % len(self.available_worlds)
                     self.world_id = self.available_worlds[self.current_world_idx] if self.current_world_idx > 0 else None
+                    self.load_world_geometry()  # Load new world geometry
             
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 1:  # Left click
@@ -196,6 +201,55 @@ class TestCaseCreator:
         self.food_x = self.config.world_width * 0.75
         self.food_y = self.config.world_height * 0.25
     
+    def load_world_geometry(self):
+        """Load and cache world geometry for rendering"""
+        self.world_obstacles = []
+        
+        if self.world_id and self.world_id != "default_empty":
+            try:
+                self.current_world = load_world(self.world_id)
+                
+                # Convert world geometry to renderable obstacles
+                # Rectangle obstacles
+                for rect in self.current_world.geometry.rectangles:
+                    # Convert center+size to corner coordinates
+                    half_w = rect.width / 2
+                    half_h = rect.height / 2
+                    x1, y1 = rect.x - half_w, rect.y - half_h
+                    x2, y2 = rect.x + half_w, rect.y + half_h
+                    
+                    self.world_obstacles.append({
+                        'type': 'rectangle',
+                        'x1': x1, 'y1': y1, 'x2': x2, 'y2': y2,
+                        'color': (128, 128, 128)  # Gray
+                    })
+                
+                # Circle obstacles
+                for circle in self.current_world.geometry.circles:
+                    self.world_obstacles.append({
+                        'type': 'circle',
+                        'x': circle.x, 'y': circle.y, 'radius': circle.radius,
+                        'color': (128, 128, 128)  # Gray
+                    })
+                
+                # Segment obstacles
+                for segment in self.current_world.geometry.segments:
+                    self.world_obstacles.append({
+                        'type': 'segment',
+                        'x1': segment.x1, 'y1': segment.y1,
+                        'x2': segment.x2, 'y2': segment.y2,
+                        'color': (128, 128, 128)  # Gray
+                    })
+                
+                print(f"Loaded world '{self.world_id}' with {len(self.world_obstacles)} obstacles")
+                
+            except Exception as e:
+                print(f"Error loading world '{self.world_id}': {e}")
+                self.current_world = None
+                self.world_obstacles = []
+        else:
+            self.current_world = None
+    
     def render(self):
         """Render the current state"""
         self.screen.fill(self.BLACK)
@@ -203,6 +257,25 @@ class TestCaseCreator:
         # Draw border
         pygame.draw.rect(self.screen, self.WHITE, 
                         (0, 0, self.config.world_width, self.config.world_height), 2)
+        
+        # Draw world obstacles
+        for obstacle in self.world_obstacles:
+            if obstacle['type'] == 'rectangle':
+                x1, y1, x2, y2 = obstacle['x1'], obstacle['y1'], obstacle['x2'], obstacle['y2']
+                width = x2 - x1
+                height = y2 - y1
+                pygame.draw.rect(self.screen, obstacle['color'], (x1, y1, width, height))
+                pygame.draw.rect(self.screen, self.WHITE, (x1, y1, width, height), 2)  # Outline
+            
+            elif obstacle['type'] == 'circle':
+                pygame.draw.circle(self.screen, obstacle['color'], 
+                                 (int(obstacle['x']), int(obstacle['y'])), int(obstacle['radius']))
+                pygame.draw.circle(self.screen, self.WHITE, 
+                                 (int(obstacle['x']), int(obstacle['y'])), int(obstacle['radius']), 2)  # Outline
+            
+            elif obstacle['type'] == 'segment':
+                pygame.draw.line(self.screen, obstacle['color'], 
+                               (obstacle['x1'], obstacle['y1']), (obstacle['x2'], obstacle['y2']), 3)
         
         # Draw food
         food_color = self.YELLOW if self.mode == "food" else self.GREEN
@@ -416,6 +489,9 @@ class TestCaseCreator:
         print("Use Ctrl+S to save the current configuration")
         print()
         
+        # Load initial world geometry
+        self.load_world_geometry()
+        
         while self.running:
             self.handle_events()
             self.render()
@@ -436,8 +512,27 @@ def main():
                        help='Maximum steps for test case (default: 600)')
     parser.add_argument('--notes', type=str, default='Custom test case created interactively',
                        help='Description/notes for test case')
+    parser.add_argument('--world', type=str, default=None,
+                       help='Initial world to load (default: default_empty, use --list-worlds to see options)')
+    parser.add_argument('--list-worlds', action='store_true',
+                       help='List available worlds and exit')
     
     args = parser.parse_args()
+    
+    # List worlds if requested
+    if args.list_worlds:
+        worlds = list_available_worlds()
+        print("Available worlds:")
+        for world_id in worlds:
+            if world_id == "default_empty":
+                print(f"  - {world_id} (default)")
+            else:
+                try:
+                    world = load_world(world_id)
+                    print(f"  - {world_id}: {world.description}")
+                except Exception as e:
+                    print(f"  - {world_id}: (error loading: {e})")
+        return
     
     # Create simulation config
     config = SimulationConfig()
@@ -447,6 +542,19 @@ def main():
     creator.test_case_id = args.id
     creator.max_steps = args.max_steps
     creator.notes = args.notes
+    
+    # Set initial world if specified
+    if args.world:
+        available_worlds = list_available_worlds()
+        if args.world in available_worlds:
+            creator.world_id = args.world
+            creator.current_world_idx = available_worlds.index(args.world)
+            print(f"Starting with world: {args.world}")
+        else:
+            print(f"Warning: World '{args.world}' not found. Available worlds:")
+            for world_id in available_worlds:
+                print(f"  - {world_id}")
+            print("Starting with default world.")
     
     creator.run()
 
