@@ -9,24 +9,8 @@ import sys
 from typing import List, Type, Optional
 from src.sim import Simulation, SimulationConfig
 from src.policy.base import Policy
-
-# Colors
-BLACK = (0, 0, 0)
-WHITE = (255, 255, 255)
-BLUE = (50, 150, 255)
-RED = (255, 50, 50)
-GREEN = (50, 255, 50)
-GRAY = (128, 128, 128)
-YELLOW = (255, 255, 0)
-CYAN = (0, 255, 255)
-
-# Wall colors for visualization
-WALL_COLORS = [
-    (255, 255, 255),  # Top wall - White
-    (0, 255, 255),    # Right wall - Cyan
-    (255, 0, 255),    # Bottom wall - Magenta
-    (255, 165, 0)     # Left wall - Orange
-]
+from src.viz.rendering_utils import (Colors, CoordinateTransform, draw_agent, draw_food, 
+                                   draw_text_lines, handle_common_events, create_info_panel_background)
 
 
 class MultiSimViewer:
@@ -55,10 +39,11 @@ class MultiSimViewer:
         self.mini_width = available_width // self.grid_cols
         self.mini_height = available_height // self.grid_rows
         
-        # Scale factor for rendering sim content in mini windows
-        self.scale_x = self.mini_width / self.config.world_width
-        self.scale_y = self.mini_height / self.config.world_height
-        self.scale = min(self.scale_x, self.scale_y) * 0.9  # Leave some margin
+        # Create coordinate transformer
+        self.coord_transform = CoordinateTransform(
+            self.config.world_width, self.config.world_height,
+            self.mini_width, self.mini_height
+        )
         
         # Create simulations and policies
         self.simulations = []
@@ -86,17 +71,7 @@ class MultiSimViewer:
     
     def world_to_mini(self, world_x: float, world_y: float, mini_x_offset: int, mini_y_offset: int) -> tuple:
         """Convert world coordinates to mini-window screen coordinates"""
-        # Center the scaled world in the mini window
-        scaled_width = self.config.world_width * self.scale
-        scaled_height = self.config.world_height * self.scale
-        
-        x_margin = (self.mini_width - scaled_width) / 2
-        y_margin = (self.mini_height - scaled_height) / 2
-        
-        screen_x = mini_x_offset + x_margin + world_x * self.scale
-        screen_y = mini_y_offset + y_margin + world_y * self.scale
-        
-        return int(screen_x), int(screen_y)
+        return self.coord_transform.world_to_screen(world_x, world_y, mini_x_offset, mini_y_offset)
     
     def draw_mini_simulation(self, sim: Simulation, mini_x: int, mini_y: int, sim_id: int):
         """Draw a single simulation in a mini window"""
@@ -106,34 +81,28 @@ class MultiSimViewer:
         food_pos = state['food_position']
         
         # Draw mini window border
-        border_color = WHITE if sim_id < len(self.simulations) else GRAY
+        border_color = Colors.WHITE if sim_id < len(self.simulations) else Colors.GRAY
         pygame.draw.rect(self.screen, border_color, 
                         (mini_x, mini_y, self.mini_width, self.mini_height), 1)
         
         # Draw world bounds (scaled)
-        world_rect_x = mini_x + (self.mini_width - self.config.world_width * self.scale) / 2
-        world_rect_y = mini_y + (self.mini_height - self.config.world_height * self.scale) / 2
-        world_rect_w = self.config.world_width * self.scale
-        world_rect_h = self.config.world_height * self.scale
+        scale = self.coord_transform.scale
+        world_rect_x = mini_x + self.coord_transform.x_margin
+        world_rect_y = mini_y + self.coord_transform.y_margin
+        world_rect_w = self.config.world_width * scale
+        world_rect_h = self.config.world_height * scale
         
-        pygame.draw.rect(self.screen, GRAY, 
+        pygame.draw.rect(self.screen, Colors.GRAY, 
                         (world_rect_x, world_rect_y, world_rect_w, world_rect_h), 1)
         
+        # Calculate offset for drawing functions
+        offset = (mini_x + self.coord_transform.x_margin, mini_y + self.coord_transform.y_margin)
+        
         # Draw food
-        food_screen_x, food_screen_y = self.world_to_mini(food_pos['x'], food_pos['y'], mini_x, mini_y)
-        food_radius = max(1, int(self.config.food_radius * self.scale))
-        pygame.draw.circle(self.screen, RED, (food_screen_x, food_screen_y), food_radius)
+        draw_food(self.screen, food_pos, self.config, scale=scale, offset=offset)
         
         # Draw agent
-        agent_screen_x, agent_screen_y = self.world_to_mini(agent_state['x'], agent_state['y'], mini_x, mini_y)
-        agent_radius = max(1, int(self.config.agent_radius * self.scale))
-        pygame.draw.circle(self.screen, BLUE, (agent_screen_x, agent_screen_y), agent_radius)
-        
-        # Draw heading indicator
-        head_length = agent_radius + 3
-        head_x = agent_screen_x + head_length * math.cos(agent_state['theta'])
-        head_y = agent_screen_y + head_length * math.sin(agent_state['theta'])
-        pygame.draw.line(self.screen, WHITE, (agent_screen_x, agent_screen_y), (head_x, head_y), 1)
+        draw_agent(self.screen, agent_state, self.config, scale=scale, offset=offset)
         
         # Draw vision if enabled
         if self.show_vision:
@@ -141,7 +110,7 @@ class MultiSimViewer:
         
         # Draw sim stats in corner
         stats_text = f"#{sim_id} F:{state['food_collected']}"
-        text_surface = self.small_font.render(stats_text, True, WHITE)
+        text_surface = self.small_font.render(stats_text, True, Colors.WHITE)
         self.screen.blit(text_surface, (mini_x + 2, mini_y + 2))
     
     def draw_mini_vision(self, sim: Simulation, mini_x: int, mini_y: int, agent_state: dict):
@@ -175,7 +144,7 @@ class MultiSimViewer:
                 # Create a temporary surface for the mini window
                 temp_surface = pygame.Surface((self.mini_width, self.mini_height))
                 temp_surface.set_alpha(30)
-                temp_surface.fill(BLACK)
+                temp_surface.fill(Colors.BLACK)
                 
                 # Adjust polygon points to be relative to temp surface
                 adjusted_points = []
@@ -215,11 +184,11 @@ class MultiSimViewer:
             
             # Draw hit point if it hit something
             if distance < sim.config.max_range:
-                hit_color = YELLOW  # Default
+                hit_color = Colors.YELLOW  # Default
                 if hit_type == 'food':
-                    hit_color = RED
+                    hit_color = Colors.RED
                 elif hit_type == 'wall':
-                    hit_color = WHITE
+                    hit_color = Colors.WHITE
                 
                 pygame.draw.circle(self.screen, hit_color, hit_screen, 1)
         
@@ -237,8 +206,8 @@ class MultiSimViewer:
         left_screen = self.world_to_mini(left_x, left_y, mini_x, mini_y)
         right_screen = self.world_to_mini(right_x, right_y, mini_x, mini_y)
         
-        pygame.draw.line(self.screen, YELLOW, agent_screen, left_screen, 1)
-        pygame.draw.line(self.screen, YELLOW, agent_screen, right_screen, 1)
+        pygame.draw.line(self.screen, Colors.YELLOW, agent_screen, left_screen, 1)
+        pygame.draw.line(self.screen, Colors.YELLOW, agent_screen, right_screen, 1)
     
     def draw_global_stats(self):
         """Draw global statistics"""
@@ -256,7 +225,7 @@ class MultiSimViewer:
         
         # Draw stats panel
         stats_y = self.screen.get_height() - 90
-        pygame.draw.rect(self.screen, (20, 20, 20), (0, stats_y, self.screen.get_width(), 90))
+        create_info_panel_background(self.screen, 0, stats_y, self.screen.get_width(), 90)
         
         stats_lines = [
             f"Simulations: {self.num_sims}  |  Policy: {self.policy_class.__name__}",
@@ -265,10 +234,11 @@ class MultiSimViewer:
             "Controls: V=toggle vision, S=toggle stats, R=reset all, ESC=quit"
         ]
         
-        for i, line in enumerate(stats_lines):
-            color = WHITE if i < 3 else GRAY
-            text = self.font.render(line, True, color)
-            self.screen.blit(text, (10, stats_y + 5 + i * 20))
+        # Prepare colors
+        colors = [Colors.WHITE if i < 3 else Colors.GRAY for i in range(len(stats_lines))]
+        
+        # Draw stats lines
+        draw_text_lines(self.screen, stats_lines, self.font, (10, stats_y + 5), colors=colors, line_spacing=20)
     
     def reset_all(self):
         """Reset all simulations"""
@@ -289,15 +259,16 @@ class MultiSimViewer:
         while running:
             # Handle events
             for event in pygame.event.get():
-                if event.type == pygame.QUIT:
+                should_quit, new_show_vision, vision_toggled = handle_common_events(event, self.show_vision)
+                if should_quit:
                     running = False
-                elif event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_ESCAPE:
-                        running = False
-                    elif event.key == pygame.K_v:
-                        self.show_vision = not self.show_vision
-                        print(f"Vision: {'ON' if self.show_vision else 'OFF'}")
-                    elif event.key == pygame.K_s:
+                if vision_toggled:
+                    self.show_vision = new_show_vision
+                    print(f"Vision: {'ON' if self.show_vision else 'OFF'}")
+                
+                # Handle additional multi-sim specific events
+                if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_s:
                         self.show_stats = not self.show_stats
                         print(f"Stats: {'ON' if self.show_stats else 'OFF'}")
                     elif event.key == pygame.K_r:
@@ -317,7 +288,7 @@ class MultiSimViewer:
             self.step_count += 1
             
             # Render
-            self.screen.fill(BLACK)
+            self.screen.fill(Colors.BLACK)
             
             # Draw each simulation in its mini window
             for i in range(self.num_sims):

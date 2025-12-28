@@ -24,6 +24,7 @@ from src.sim.unified import SimulationSingle
 from src.policy.checkpoint import load_policy
 from src.eval.load_suite import load_suite
 from src.viz.vision_rendering import draw_vision_from_sim_state
+from src.viz.rendering_utils import Colors, draw_simulation_state, draw_text_lines
 
 
 @dataclass
@@ -157,12 +158,12 @@ def viewer_process(message_queue: mp.Queue, viewer_config: ViewerConfig,
     test_case_start_time = time.time()
     show_vision = True
     
-    # Colors
-    BLACK = (0, 0, 0)
-    WHITE = (255, 255, 255)
-    RED = (255, 50, 50)
-    GREEN = (50, 255, 50)
-    BLUE = (50, 150, 255)
+    # Colors (using shared Colors class)
+    BLACK = Colors.BLACK
+    WHITE = Colors.WHITE
+    RED = Colors.RED
+    GREEN = Colors.GREEN
+    BLUE = Colors.BLUE
     
     # Main viewer loop
     while running:
@@ -272,29 +273,11 @@ def viewer_process(message_queue: mp.Queue, viewer_config: ViewerConfig,
         # Render current state
         screen.fill(BLACK)
         
-        # Draw border
-        pygame.draw.rect(screen, WHITE, (0, 0, sim_config.world_width, sim_config.world_height), 2)
-        
         # Get current simulation state for rendering
         sim_state = sim.get_state()
         
-        # Draw food
-        food_pos = sim_state['food_position']
-        pygame.draw.circle(screen, GREEN, (int(food_pos['x']), int(food_pos['y'])), sim_config.food_radius)
-        
-        # Draw agent
-        agent_state = sim_state['agent_state']
-        agent_x, agent_y = agent_state['x'], agent_state['y']
-        agent_theta = agent_state['theta']
-        
-        # Agent body (circle)
-        pygame.draw.circle(screen, BLUE, (int(agent_x), int(agent_y)), sim_config.agent_radius)
-        
-        # Agent direction indicator
-        dir_length = sim_config.agent_radius * 1.5
-        end_x = agent_x + dir_length * math.cos(agent_theta)
-        end_y = agent_y + dir_length * math.sin(agent_theta)
-        pygame.draw.line(screen, WHITE, (agent_x, agent_y), (end_x, end_y), 2)
+        # Draw simulation state (border, food, agent)
+        draw_simulation_state(screen, sim_state, sim_config)
         
         # Draw vision rays if enabled
         if show_vision:
@@ -310,10 +293,11 @@ def viewer_process(message_queue: mp.Queue, viewer_config: ViewerConfig,
             "Controls: V=vision, N=next case, ESC=close viewer only"
         ]
         
-        for i, line in enumerate(info_lines):
-            color = GREEN if food_collected and i == 2 else WHITE
-            text = font.render(line, True, color)
-            screen.blit(text, (10, 10 + i * 25))
+        # Prepare colors for info lines
+        info_colors = [GREEN if food_collected and i == 2 else WHITE for i in range(len(info_lines))]
+        
+        # Draw info lines
+        draw_text_lines(screen, info_lines, font, (10, 10), colors=info_colors)
         
         pygame.display.flip()
         clock.tick(viewer_config.fps)
