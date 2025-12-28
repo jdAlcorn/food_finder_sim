@@ -442,17 +442,17 @@ def evaluate_candidate_suite_worker(args):
     
     Args:
         args: Tuple of (candidate_idx, theta_flat, model_ctor, model_kwargs, sim_config, 
-                       test_suite, fitness_kwargs, generation)
+                       test_suite, fitness_kwargs, dt, generation)
     
     Returns:
         Tuple of (candidate_idx, fitness)
     """
     (candidate_idx, theta_flat, model_ctor, model_kwargs, sim_config, 
-     test_suite, fitness_kwargs, generation) = args
+     test_suite, fitness_kwargs, dt, generation) = args
     
     try:
         # Import here to avoid circular imports
-        from ..eval.suite_evaluator import evaluate_candidate_on_suite
+        from src.eval.suite_evaluator import evaluate_candidate_on_suite
         
         # Extract parameters
         batch_size = fitness_kwargs.get('batch_size', 32)
@@ -466,6 +466,7 @@ def evaluate_candidate_suite_worker(args):
             model_kwargs=model_kwargs,
             sim_config=sim_config,
             suite=test_suite,
+            dt=dt,
             batch_size=batch_size,
             device="cpu",  # Force CPU for multiprocessing compatibility
             v_scale=v_scale,

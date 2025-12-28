@@ -10,7 +10,7 @@ import multiprocessing as mp
 from typing import Dict, Any, Callable, Tuple, List
 from concurrent.futures import ProcessPoolExecutor
 from src.sim.core import SimulationConfig
-from .rollout import evaluate_candidate_worker
+from .rollout import evaluate_candidate_worker, evaluate_candidate_suite_worker
 
 
 class EvolutionStrategiesTrainer:
@@ -66,7 +66,7 @@ class EvolutionStrategiesTrainer:
             if test_suite_path is None:
                 test_suite_path = "data/test_suites/basic_v1.json"
             
-            from ..eval.load_suite import load_suite
+            from src.eval.load_suite import load_suite
             self.test_suite = load_suite(test_suite_path)
             print(f"Loaded test suite: {self.test_suite.suite_id} v{self.test_suite.version}")
             print(f"  Test cases: {len(self.test_suite)}")
@@ -217,6 +217,7 @@ class EvolutionStrategiesTrainer:
                     self.sim_config,
                     self.test_suite,
                     self.fitness_kwargs,  # Contains batch_size for test case batching
+                    self.dt,  # Add dt parameter
                     iteration  # Add generation number for logging
                 )
                 worker_args.append(args)
@@ -254,11 +255,9 @@ class EvolutionStrategiesTrainer:
             # Evaluate using respawn worker function
             if self.executor is None:
                 # Single-threaded
-                from .rollout import evaluate_candidate_worker
                 results = [evaluate_candidate_worker(args) for args in worker_args]
             else:
                 # Multi-threaded using persistent executor
-                from .rollout import evaluate_candidate_worker
                 results = list(self.executor.map(evaluate_candidate_worker, worker_args))
         
         eval_time = time.time() - eval_start_time

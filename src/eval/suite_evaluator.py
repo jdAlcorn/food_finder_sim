@@ -19,6 +19,7 @@ def evaluate_candidate_on_suite(
     model_kwargs: Dict[str, Any],
     sim_config: SimulationConfig,
     suite: TestSuite,
+    dt: float,
     batch_size: int = 32,
     device: str = "cpu",
     v_scale: float = 400.0,
@@ -34,6 +35,7 @@ def evaluate_candidate_on_suite(
         model_kwargs: Model constructor arguments
         sim_config: Simulation configuration
         suite: Test suite to evaluate on
+        dt: Simulation timestep
         batch_size: Batch size for evaluation (number of test cases per batch)
         device: Device for PyTorch operations
         v_scale: Velocity normalization scale
@@ -71,7 +73,7 @@ def evaluate_candidate_on_suite(
         
         # Evaluate this batch
         batch_scores, batch_reached = _evaluate_test_case_batch(
-            model, batch_cases, sim_config, current_batch_size,
+            model, batch_cases, sim_config, dt, current_batch_size,
             device, v_scale, omega_scale, max_range
         )
         
@@ -96,6 +98,7 @@ def _evaluate_test_case_batch(
     model: torch.nn.Module,
     test_cases: List[TestCase],
     sim_config: SimulationConfig,
+    dt: float,
     batch_size: int,
     device: str,
     v_scale: float,
@@ -138,7 +141,7 @@ def _evaluate_test_case_batch(
         food_states.append(food_state)
         
         max_steps_list.append(case.max_steps)
-        dt_list.append(case.dt if case.dt is not None else sim_config.dt)
+        dt_list.append(case.dt if case.dt is not None else dt)
     
     # Reset simulation to test case states
     batched_sim.reset_to_states(agent_states, food_states)
