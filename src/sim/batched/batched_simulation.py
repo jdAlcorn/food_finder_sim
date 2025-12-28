@@ -192,6 +192,9 @@ class BatchedSimulation:
         # Handle wall collisions (vectorized)
         self._handle_wall_collisions()
         
+        # Handle obstacle collisions (vectorized)
+        self._handle_obstacle_collisions()
+        
         # Check food collisions and respawn
         food_collected_mask = self._check_and_handle_food_collisions()
         
@@ -296,6 +299,119 @@ class BatchedSimulation:
         self.agent_y[bottom_collision] = config.world_height - radius
         self.agent_vy[bottom_collision] *= -restitution
         self.agent_omega[bottom_collision] *= 0.8
+    
+    def _handle_obstacle_collisions(self):
+        """
+        Handle collisions with obstacles (circles and segments) for all environments (vectorized)
+        """
+        config = self.config
+        radius = config.agent_radius
+        restitution = config.wall_restitution
+        
+        # Handle circle obstacle collisions
+        for i in range(self.scene.Kc_max):
+            # Skip inactive circles or food circles
+            active_mask = self.scene.circles_active[:, i]
+            food_mask = self.scene.circles_material[:, i] == 2  # MATERIAL_FOOD
+            obstacle_mask = active_mask & ~food_mask
+            
+            if not np.any(obstacle_mask):
+                continue
+            
+            # Compute distances to circle centers
+            dx = self.agent_x - self.scene.circles_center[:, i, 0]
+            dy = self.agent_y - self.scene.circles_center[:, i, 1]
+            distances = np.sqrt(dx * dx + dy * dy)
+            
+            # Check collision (agent radius + obstacle radius)
+            obstacle_radii = self.scene.circles_radius[:, i]
+            collision_distance = radius + obstacle_radii
+            collision_mask = obstacle_mask & (distances <= collision_distance)
+            
+            if not np.any(collision_mask):
+                continue
+            
+            # Handle collisions - push agent out and reverse velocity component
+            # Normalize collision direction
+            safe_distances = np.where(distances > 1e-6, distances, 1e-6)
+            nx = dx / safe_distances
+            ny = dy / safe_distances
+            
+            # Push agent out to surface
+            target_distance = collision_distance[collision_mask]
+            current_distance = distances[collision_mask]
+            push_distance = target_distance - current_distance
+            
+            self.agent_x[collision_mask] += nx[collision_mask] * push_distance
+            self.agent_y[collision_mask] += ny[collision_mask] * push_distance
+            
+            # Reflect velocity component along collision normal
+            vn = self.agent_vx[collision_mask] * nx[collision_mask] + self.agent_vy[collision_mask] * ny[collision_mask]
+            self.agent_vx[collision_mask] -= (1 + restitution) * vn * nx[collision_mask]
+            self.agent_vy[collision_mask] -= (1 + restitution) * vn * ny[collision_mask]
+            
+            # Reduce angular velocity
+            self.agent_omega[collision_mask] *= 0.8
+        
+        # Handle segment obstacle collisions
+        for i in range(self.scene.Ks_max):
+            # Skip inactive segments or boundary walls (first 4 segments)
+            active_mask = self.scene.segments_active[:, i]
+            
+            # Only process obstacle segments (material_id >= 3), not boundary walls
+            obstacle_mask = active_mask & (self.scene.segments_material[:, i] >= 3)
+            
+            if not np.any(obstacle_mask):
+                continue
+            
+            # Get segment endpoints
+            p1 = self.scene.segments_p1[:, i]  # [B, 2]
+            p2 = self.scene.segments_p2[:, i]  # [B, 2]
+            
+            # Agent positions
+            agent_pos = np.stack([self.agent_x, self.agent_y], axis=1)  # [B, 2]
+            
+            # Find closest point on segment to agent
+            seg_vec = p2 - p1  # [B, 2]
+            agent_vec = agent_pos - p1  # [B, 2]
+            
+            # Project agent onto segment line
+            seg_len_sq = np.sum(seg_vec * seg_vec, axis=1)  # [B]
+            safe_seg_len_sq = np.where(seg_len_sq > 1e-6, seg_len_sq, 1e-6)
+            
+            t = np.sum(agent_vec * seg_vec, axis=1) / safe_seg_len_sq  # [B]
+            t = np.clip(t, 0, 1)  # Clamp to segment
+            
+            # Closest point on segment
+            closest_point = p1 + t[:, np.newaxis] * seg_vec  # [B, 2]
+            
+            # Distance from agent to closest point
+            diff = agent_pos - closest_point  # [B, 2]
+            distances = np.sqrt(np.sum(diff * diff, axis=1))  # [B]
+            
+            # Check collision
+            collision_mask = obstacle_mask & (distances <= radius)
+            
+            if not np.any(collision_mask):
+                continue
+            
+            # Handle collisions - push agent out and reflect velocity
+            safe_distances = np.where(distances > 1e-6, distances, 1e-6)
+            nx = diff[:, 0] / safe_distances
+            ny = diff[:, 1] / safe_distances
+            
+            # Push agent out
+            push_distance = radius - distances[collision_mask]
+            self.agent_x[collision_mask] += nx[collision_mask] * push_distance
+            self.agent_y[collision_mask] += ny[collision_mask] * push_distance
+            
+            # Reflect velocity component along collision normal
+            vn = self.agent_vx[collision_mask] * nx[collision_mask] + self.agent_vy[collision_mask] * ny[collision_mask]
+            self.agent_vx[collision_mask] -= (1 + restitution) * vn * nx[collision_mask]
+            self.agent_vy[collision_mask] -= (1 + restitution) * vn * ny[collision_mask]
+            
+            # Reduce angular velocity
+            self.agent_omega[collision_mask] *= 0.8
     
     def _check_and_handle_food_collisions(self) -> np.ndarray:
         """

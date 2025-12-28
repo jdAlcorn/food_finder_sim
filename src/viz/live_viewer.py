@@ -71,8 +71,25 @@ class TestCasePolicy:
 
 def run_test_case_with_timeout(policy, test_case, config, viewer_config):
     """Run a single test case with the given policy for a fixed duration"""
-    # Create simulation
-    sim = SimulationSingle(config)
+    # Create simulation with world integration
+    from src.eval.world_integration import resolve_test_case_world, apply_world_to_simulation
+    from src.sim.batched import BatchedSimulation
+    
+    try:
+        # Resolve world for this test case
+        world = resolve_test_case_world(test_case)
+        
+        # Create batched simulation and apply world
+        batched_sim = BatchedSimulation(1, config)
+        updated_config = apply_world_to_simulation(batched_sim, world, [test_case])
+        
+        # Create unified simulation wrapper
+        sim = SimulationSingle(updated_config)
+        sim.batched_sim = batched_sim
+        
+    except Exception as e:
+        print(f"Viewer: Warning - Could not apply world geometry: {e}")
+        sim = SimulationSingle(config)
     
     # Set up test case initial state
     agent_states = [{
@@ -227,8 +244,25 @@ def viewer_process(message_queue: mp.Queue, viewer_config: ViewerConfig,
         # Get current test case
         test_case = suite.test_cases[current_test_case_idx]
         
-        # Create and run simulation for current frame
-        sim = SimulationSingle(sim_config)
+        # Create and run simulation for current frame with world integration
+        from src.eval.world_integration import resolve_test_case_world, apply_world_to_simulation
+        from src.sim.batched import BatchedSimulation
+        
+        # Resolve world for this test case
+        try:
+            world = resolve_test_case_world(test_case)
+            
+            # Create batched simulation and apply world
+            batched_sim = BatchedSimulation(1, sim_config)
+            updated_config = apply_world_to_simulation(batched_sim, world, [test_case])
+            
+            # Create unified simulation wrapper
+            sim = SimulationSingle(updated_config)
+            sim.batched_sim = batched_sim
+            
+        except Exception as e:
+            print(f"Viewer: Warning - Could not apply world geometry: {e}")
+            sim = SimulationSingle(sim_config)
         
         # Set up test case initial state
         agent_states = [{
@@ -276,8 +310,8 @@ def viewer_process(message_queue: mp.Queue, viewer_config: ViewerConfig,
         # Get current simulation state for rendering
         sim_state = sim.get_state()
         
-        # Draw simulation state (border, food, agent)
-        draw_simulation_state(screen, sim_state, sim_config)
+        # Draw simulation state (border, food, agent, obstacles)
+        draw_simulation_state(screen, sim_state, sim_config, scene=sim.batched_sim.scene, env_idx=0)
         
         # Draw vision rays if enabled
         if show_vision:

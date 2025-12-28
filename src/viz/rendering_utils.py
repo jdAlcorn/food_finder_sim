@@ -110,6 +110,57 @@ def draw_world_border(screen: pygame.Surface, config: SimulationConfig,
     pygame.draw.rect(screen, color, (x, y, width, height), thickness)
 
 
+def draw_obstacles(screen: pygame.Surface, scene, env_idx: int = 0, 
+                  scale: float = 1.0, offset: Tuple[int, int] = (0, 0)):
+    """
+    Draw obstacles from batched scene for a specific environment
+    
+    Args:
+        screen: Pygame surface to draw on
+        scene: BatchedScene instance
+        env_idx: Environment index to render (default: 0)
+        scale: Scale factor for rendering
+        offset: (x, y) offset for rendering position
+    """
+    # Draw segment obstacles (walls and line obstacles)
+    for i in range(scene.Ks_max):
+        if scene.segments_active[env_idx, i]:
+            # Get segment endpoints
+            p1 = scene.segments_p1[env_idx, i]
+            p2 = scene.segments_p2[env_idx, i]
+            color = tuple(scene.segments_color[env_idx, i])
+            
+            # Scale and offset coordinates
+            x1 = p1[0] * scale + offset[0]
+            y1 = p1[1] * scale + offset[1]
+            x2 = p2[0] * scale + offset[0]
+            y2 = p2[1] * scale + offset[1]
+            
+            # Draw segment as line
+            thickness = max(1, int(3 * scale))
+            pygame.draw.line(screen, color, (int(x1), int(y1)), (int(x2), int(y2)), thickness)
+    
+    # Draw circle obstacles
+    for i in range(scene.Kc_max):
+        if scene.circles_active[env_idx, i]:
+            # Skip food (material ID 2) - it's drawn separately
+            if scene.circles_material[env_idx, i] == 2:  # MATERIAL_FOOD
+                continue
+                
+            # Get circle properties
+            center = scene.circles_center[env_idx, i]
+            radius = scene.circles_radius[env_idx, i]
+            color = tuple(scene.circles_color[env_idx, i])
+            
+            # Scale and offset coordinates
+            x = center[0] * scale + offset[0]
+            y = center[1] * scale + offset[1]
+            scaled_radius = max(1, int(radius * scale))
+            
+            # Draw circle
+            pygame.draw.circle(screen, color, (int(x), int(y)), scaled_radius)
+
+
 def draw_text_lines(screen: pygame.Surface, lines: List[str], font: pygame.font.Font,
                    position: Tuple[int, int], color: Tuple[int, int, int] = None,
                    line_spacing: int = 25, colors: List[Tuple[int, int, int]] = None):
@@ -253,9 +304,10 @@ class CoordinateTransform:
 
 def draw_simulation_state(screen: pygame.Surface, sim_state: Dict[str, Any], config: SimulationConfig,
                          scale: float = 1.0, offset: Tuple[int, int] = (0, 0),
-                         show_border: bool = True, border_thickness: int = 2):
+                         show_border: bool = True, border_thickness: int = 2,
+                         scene=None, env_idx: int = 0):
     """
-    Draw complete simulation state (agent + food + border)
+    Draw complete simulation state (agent + food + border + obstacles)
     
     Args:
         screen: Pygame surface to draw on
@@ -265,10 +317,16 @@ def draw_simulation_state(screen: pygame.Surface, sim_state: Dict[str, Any], con
         offset: (x, y) offset for rendering position
         show_border: Whether to draw world border
         border_thickness: Border line thickness
+        scene: Optional BatchedScene for obstacle rendering
+        env_idx: Environment index for obstacle rendering
     """
     # Draw border
     if show_border:
         draw_world_border(screen, config, scale=scale, offset=offset, thickness=border_thickness)
+    
+    # Draw obstacles if scene is provided
+    if scene is not None:
+        draw_obstacles(screen, scene, env_idx=env_idx, scale=scale, offset=offset)
     
     # Draw food
     food_pos = sim_state['food_position']

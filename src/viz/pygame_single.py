@@ -162,6 +162,11 @@ def run_simulation_gui(policy: PolicyProtocol, config: SimulationConfig = None,
         # Draw border
         pygame.draw.rect(screen, Colors.WHITE, (0, 0, config.world_width, config.world_height), 2)
         
+        # Draw obstacles from scene (if simulation has batched scene)
+        if hasattr(sim, 'batched_sim') and sim.batched_sim is not None:
+            from src.viz.rendering_utils import draw_obstacles
+            draw_obstacles(screen, sim.batched_sim.scene, env_idx=0)
+        
         # Draw game objects
         draw_food(screen, step_info['food_position'], config)
         draw_agent(screen, step_info['agent_state'], config)
