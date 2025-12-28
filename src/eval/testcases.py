@@ -67,12 +67,14 @@ class TestCase:
     agent_start: AgentState
     food: FoodState
     dt: Optional[float] = None  # Use sim_config dt if None
-    obstacles: Obstacles = field(default_factory=Obstacles)
+    world_id: Optional[str] = None  # Reference to world spec (None = default_empty)
+    world_overrides: Dict[str, Any] = field(default_factory=dict)  # Override world settings
+    obstacles: Obstacles = field(default_factory=Obstacles)  # DEPRECATED: use world_id instead
     notes: str = ""
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization"""
-        return {
+        result = {
             'id': self.id,
             'max_steps': self.max_steps,
             'dt': self.dt,
@@ -90,18 +92,30 @@ class TestCase:
                 'y': self.food.y,
                 'radius': self.food.radius
             },
-            'obstacles': {
-                'circles': [
-                    {'x': c.x, 'y': c.y, 'radius': c.radius, 'material_id': c.material_id}
-                    for c in self.obstacles.circles
-                ],
-                'segments': [
-                    {'x1': s.x1, 'y1': s.y1, 'x2': s.x2, 'y2': s.y2, 'material_id': s.material_id}
-                    for s in self.obstacles.segments
-                ]
-            },
             'notes': self.notes
         }
+        
+        # Add world reference if specified
+        if self.world_id is not None:
+            result['world_id'] = self.world_id
+        
+        # Add world overrides if any
+        if self.world_overrides:
+            result['world_overrides'] = self.world_overrides
+        
+        # Include obstacles for backward compatibility (but prefer world_id)
+        result['obstacles'] = {
+            'circles': [
+                {'x': c.x, 'y': c.y, 'radius': c.radius, 'material_id': c.material_id}
+                for c in self.obstacles.circles
+            ],
+            'segments': [
+                {'x1': s.x1, 'y1': s.y1, 'x2': s.x2, 'y2': s.y2, 'material_id': s.material_id}
+                for s in self.obstacles.segments
+            ]
+        }
+        
+        return result
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'TestCase':
@@ -124,6 +138,7 @@ class TestCase:
             radius=food_data.get('radius', 8.0)
         )
         
+        # Load obstacles for backward compatibility
         obstacles_data = data.get('obstacles', {})
         obstacles = Obstacles(
             circles=[
@@ -148,6 +163,8 @@ class TestCase:
             dt=data.get('dt'),
             agent_start=agent_start,
             food=food,
+            world_id=data.get('world_id'),
+            world_overrides=data.get('world_overrides', {}),
             obstacles=obstacles,
             notes=data.get('notes', '')
         )

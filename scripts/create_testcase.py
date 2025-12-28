@@ -24,6 +24,7 @@ except ImportError:
 from src.sim.core import SimulationConfig
 from src.eval.testcases import TestCase, AgentState, FoodState, Obstacles
 from src.eval.load_suite import load_suite, save_suite, TestSuite
+from src.eval.load_world import list_available_worlds, load_world
 from src.viz.vision_rendering import draw_vision_cone, create_mock_vision_data
 
 
@@ -89,6 +90,11 @@ class TestCaseCreator:
         self.test_case_id = "custom_test_case"
         self.max_steps = 600
         self.notes = "Custom test case created interactively"
+        self.world_id = None  # No world selected by default
+        
+        # Available worlds
+        self.available_worlds = list_available_worlds()
+        self.current_world_idx = 0  # Index into available_worlds (0 = default_empty)
         
         # Movement speed
         self.move_speed = 5.0
@@ -120,6 +126,11 @@ class TestCaseCreator:
                 elif event.key == pygame.K_v:
                     # Toggle vision display
                     self.show_vision = not self.show_vision
+                
+                elif event.key == pygame.K_w:
+                    # Cycle through available worlds
+                    self.current_world_idx = (self.current_world_idx + 1) % len(self.available_worlds)
+                    self.world_id = self.available_worlds[self.current_world_idx] if self.current_world_idx > 0 else None
             
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 1:  # Left click
@@ -238,6 +249,7 @@ class TestCaseCreator:
             f"Distance: {math.sqrt((self.agent_x - self.food_x)**2 + (self.agent_y - self.food_y)**2):.1f}",
             f"Suite: {os.path.basename(self.suite_path) if self.suite_path else 'Individual file'}",
             f"Case ID: {self.test_case_id}",
+            f"World: {self.world_id or 'default_empty'} (W to cycle)",
             f"Vision: {'ON' if self.show_vision else 'OFF'} (V to toggle)",
             "",
             "Controls:",
@@ -245,6 +257,7 @@ class TestCaseCreator:
             "  A/D: Rotate agent (agent mode only)",
             "  Click: Move selected object to mouse",
             "  TAB: Switch between agent/food",
+            "  W: Cycle through available worlds",
             "  V: Toggle vision cone display",
             "  Ctrl+S: Save test case",
             "  R: Reset positions",
@@ -285,7 +298,9 @@ class TestCaseCreator:
             dt=None,  # Use default
             agent_start=agent_state,
             food=food_state,
-            obstacles=obstacles,
+            world_id=self.world_id,  # Reference to world
+            world_overrides={},  # No overrides in creator
+            obstacles=obstacles,  # Keep for backward compatibility
             notes=self.notes
         )
         

@@ -16,6 +16,7 @@ from src.sim import SimulationConfig
 from src.sim.unified import SimulationSingle
 from src.policy.manual import ManualPolicy
 from src.policy.checkpoint import load_policy
+from src.eval.world_integration import resolve_test_case_world
 
 
 def play_testcase(suite_path: str, case_id: str, agent_path: str = None, dt: float = None):
@@ -47,6 +48,24 @@ def play_testcase(suite_path: str, case_id: str, agent_path: str = None, dt: flo
     print(f"Playing test case: {test_case.id}")
     print(f"Description: {test_case.notes}")
     print(f"Max steps: {test_case.max_steps}")
+    
+    # Show world information
+    if test_case.world_id:
+        print(f"World: {test_case.world_id}")
+        if test_case.world_overrides:
+            print(f"World overrides: {len(test_case.world_overrides)} settings")
+    else:
+        print("World: default_empty")
+    
+    # Resolve world for this test case
+    try:
+        world = resolve_test_case_world(test_case)
+        print(f"Resolved world bounds: {world.bounds.width}x{world.bounds.height}")
+        obstacle_count = len(world.geometry.rectangles) + len(world.geometry.circles) + len(world.geometry.segments)
+        if obstacle_count > 0:
+            print(f"World obstacles: {obstacle_count} total")
+    except Exception as e:
+        print(f"Warning: Could not resolve world: {e}")
     
     # Create policy
     if agent_path:

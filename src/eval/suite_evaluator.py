@@ -8,6 +8,7 @@ import numpy as np
 import math
 from typing import List, Dict, Any, Tuple, Optional, Callable
 from .testcases import TestSuite, TestCase
+from .world_integration import setup_simulation_with_worlds
 from ..sim.batched import BatchedSimulation
 from ..sim.core import SimulationConfig
 from ..training.es.params import set_flat_params
@@ -142,8 +143,8 @@ def _evaluate_test_case_batch(
     Returns:
         Tuple of (scores, reached_flags, diagnostics)
     """
-    # Create batched simulation
-    batched_sim = BatchedSimulation(batch_size, sim_config)
+    # Create batched simulation with world support
+    batched_sim, updated_sim_config = setup_simulation_with_worlds(test_cases, sim_config)
     
     # Prepare initial states
     agent_states = []

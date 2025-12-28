@@ -1,0 +1,30 @@
+{
+  "world_id": "corridor",
+  "version": "1.0",
+  "description": "Narrow corridor with walls forcing linear navigation",
+  "bounds": {
+    "width": 800.0,
+    "height": 800.0
+  },
+  "physics": {},
+  "geometry": {
+    "rectangles": [
+      {
+        "x": 400.0,
+        "y": 200.0,
+        "width": 600.0,
+        "height": 50.0,
+        "material_id": 3
+      },
+      {
+        "x": 400.0,
+        "y": 600.0,
+        "width": 600.0,
+        "height": 50.0,
+        "material_id": 3
+      }
+    ],
+    "circles": [],
+    "segments": []
+  }
+}

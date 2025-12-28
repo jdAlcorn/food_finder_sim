@@ -18,6 +18,9 @@ from src.policy.scripted import ScriptedPolicy
 from src.policy.nn_policy_stub import NeuralPolicyStub
 from src.policy.nn_torch_mlp import TorchMLPPolicy
 from src.policy.checkpoint import load_policy
+from src.eval.load_world import load_world, list_available_worlds
+from src.eval.world_integration import apply_world_to_simulation
+from src.sim.batched import BatchedSimulation
 
 
 def run_headless_simulation(policy, config: SimulationConfig, max_steps: int = 5000, 
@@ -153,6 +156,10 @@ def main():
                        default='scripted', help='Policy type to use')
     parser.add_argument('--checkpoint', type=str,
                        help='Path to checkpoint file (required if policy=checkpoint)')
+    parser.add_argument('--world', type=str, default=None,
+                       help='World ID to load (default: empty world)')
+    parser.add_argument('--list-worlds', action='store_true',
+                       help='List available worlds and exit')
     parser.add_argument('--max-steps', type=int, default=5000,
                        help='Maximum simulation steps (default: 5000)')
     parser.add_argument('--dt', type=float, default=1/60,
@@ -165,6 +172,14 @@ def main():
                        help='Steps between progress prints (default: 100)')
     
     args = parser.parse_args()
+    
+    # List worlds if requested
+    if args.list_worlds:
+        worlds = list_available_worlds()
+        print("Available worlds:")
+        for world_id in worlds:
+            print(f"  - {world_id}")
+        return
     
     # Validate arguments
     if args.policy == 'checkpoint' and not args.checkpoint:
@@ -190,6 +205,39 @@ def main():
         except Exception as e:
             print(f"Error loading checkpoint: {e}")
             sys.exit(1)
+    
+    # Apply world if specified
+    sim = None
+    if args.world:
+        try:
+            print(f"Loading world: {args.world}")
+            world = load_world(args.world)
+            
+            # Create a single-environment batched simulation to apply world
+            batched_sim = BatchedSimulation(1, config)
+            
+            # Apply world geometry and physics
+            updated_config = apply_world_to_simulation(batched_sim, world, [])
+            
+            # Create unified simulation wrapper
+            from src.sim.unified import SimulationSingle
+            sim = SimulationSingle(updated_config)
+            sim.batched_sim = batched_sim
+            
+            print(f"World loaded: {world.description}")
+            obstacle_count = (len(world.geometry.rectangles) + 
+                            len(world.geometry.circles) + 
+                            len(world.geometry.segments))
+            if obstacle_count > 0:
+                print(f"World has {obstacle_count} obstacles")
+            
+            # Update config for headless runner
+            config = updated_config
+            
+        except Exception as e:
+            print(f"Error loading world '{args.world}': {e}")
+            print("Falling back to default empty world")
+            sim = None
     
     # Run simulation
     results = run_headless_simulation(

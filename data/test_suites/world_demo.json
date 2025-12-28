@@ -1,0 +1,125 @@
+{
+  "suite_id": "world_demo",
+  "version": "1.0",
+  "description": "Demonstration of world-based test cases with reusable environments",
+  "test_cases": [
+    {
+      "id": "corridor_navigation",
+      "max_steps": 800,
+      "dt": null,
+      "world_id": "corridor",
+      "agent_start": {
+        "x": 100.0,
+        "y": 400.0,
+        "theta": 0.0,
+        "vx": 0.0,
+        "vy": 0.0,
+        "omega": 0.0,
+        "throttle": 0.0
+      },
+      "food": {
+        "x": 700.0,
+        "y": 400.0,
+        "radius": 8.0
+      },
+      "obstacles": {
+        "circles": [],
+        "segments": []
+      },
+      "notes": "Navigate through narrow corridor to reach food"
+    },
+    {
+      "id": "maze_challenge",
+      "max_steps": 1000,
+      "dt": null,
+      "world_id": "maze_simple",
+      "agent_start": {
+        "x": 100.0,
+        "y": 100.0,
+        "theta": 0.7854,
+        "vx": 0.0,
+        "vy": 0.0,
+        "omega": 0.0,
+        "throttle": 0.0
+      },
+      "food": {
+        "x": 700.0,
+        "y": 700.0,
+        "radius": 8.0
+      },
+      "obstacles": {
+        "circles": [],
+        "segments": []
+      },
+      "notes": "Navigate around obstacles in simple maze"
+    },
+    {
+      "id": "corridor_with_override",
+      "max_steps": 600,
+      "dt": null,
+      "world_id": "corridor",
+      "world_overrides": {
+        "bounds.width": 1000.0,
+        "geometry.rectangles": [
+          {
+            "x": 500.0,
+            "y": 200.0,
+            "width": 800.0,
+            "height": 50.0,
+            "material_id": 3
+          },
+          {
+            "x": 500.0,
+            "y": 600.0,
+            "width": 800.0,
+            "height": 50.0,
+            "material_id": 3
+          }
+        ]
+      },
+      "agent_start": {
+        "x": 100.0,
+        "y": 400.0,
+        "theta": 0.0,
+        "vx": 0.0,
+        "vy": 0.0,
+        "omega": 0.0,
+        "throttle": 0.0
+      },
+      "food": {
+        "x": 900.0,
+        "y": 400.0,
+        "radius": 8.0
+      },
+      "obstacles": {
+        "circles": [],
+        "segments": []
+      },
+      "notes": "Corridor with wider bounds and extended walls via overrides"
+    },
+    {
+      "id": "default_world_case",
+      "max_steps": 500,
+      "dt": null,
+      "agent_start": {
+        "x": 200.0,
+        "y": 200.0,
+        "theta": 0.0,
+        "vx": 0.0,
+        "vy": 0.0,
+        "omega": 0.0,
+        "throttle": 0.0
+      },
+      "food": {
+        "x": 600.0,
+        "y": 600.0,
+        "radius": 8.0
+      },
+      "obstacles": {
+        "circles": [],
+        "segments": []
+      },
+      "notes": "Uses default empty world (no world_id specified)"
+    }
+  ]
+}
