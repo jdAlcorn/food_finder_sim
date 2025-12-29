@@ -27,7 +27,7 @@ def evaluate_candidate_on_suite(
     omega_scale: float = 10.0,
     max_range: float = None,
     fail_weight: float = 0.20,
-    proximity_scale: float = 15.0
+    proximity_scale: float = 25.0
 ) -> Tuple[float, np.ndarray, Dict[str, Any]]:
     """
     Evaluate a candidate policy on a test suite
@@ -141,7 +141,7 @@ def _evaluate_test_case_batch(
     omega_scale: float,
     max_range: float,
     fail_weight: float = 0.20,
-    proximity_scale: float = 15.0
+    proximity_scale: float = 25.0
 ) -> Tuple[List[float], List[bool], Dict[str, Any]]:
     """
     Evaluate a batch of test cases with dense progress-based fitness

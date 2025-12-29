@@ -167,10 +167,20 @@ class EvolutionStrategiesTrainer:
         # Convert to numpy for ES update
         fitnesses = np.array(fitnesses)
         
-        # Normalize fitness (fitness shaping)
+        # Use raw fitness differences (preserve exponential proximity variance)
+        # NOTE: Disabled standard ES normalization to preserve exponential proximity scaling
         fitness_mean = np.mean(fitnesses)
-        fitness_std = np.std(fitnesses) + 1e-8
-        fitness_normalized = (fitnesses - fitness_mean) / fitness_std
+        fitness_std_raw = np.std(fitnesses)
+        fitness_normalized = fitnesses - fitness_mean
+        
+        # Log fitness variance for diagnostics (every 10 generations)
+        if iteration % 10 == 0:
+            fitness_range = np.max(fitnesses) - np.min(fitnesses)
+            print(f"  Fitness variance: std={fitness_std_raw:.6f}, range={fitness_range:.6f}, "
+                  f"mean={fitness_mean:.4f}")
+            if fitness_std_raw < 1e-6:
+                print(f"  ⚠ WARNING: Very low fitness variance detected!")
+                print(f"  Raw fitnesses sample: {fitnesses[:5]}")  # Show first 5 values
         
         # ES gradient estimate
         gradient = np.dot(eps.T, fitness_normalized) / (self.pop_size * self.sigma)

@@ -70,8 +70,8 @@ def parse_args():
                        help='Scale factor for proximity reward (default: 1.0)')
     parser.add_argument('--fail-weight', type=float, default=0.20,
                        help='Weight for progress-based fitness on failed test cases (default: 0.20, range [0,0.2])')
-    parser.add_argument('--proximity-scale', type=float, default=15.0,
-                       help='Scale parameter for exponential proximity reward on failed test cases (default: 15.0)')
+    parser.add_argument('--proximity-scale', type=float, default=25.0,
+                       help='Scale parameter for exponential proximity reward on failed test cases (default: 25.0)')
     
     # System parameters
     parser.add_argument('--workers', type=int, default=None,
