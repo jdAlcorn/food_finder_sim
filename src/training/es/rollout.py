@@ -251,7 +251,12 @@ def rollout_fitness_batched(theta_flat: torch.Tensor, model_ctor: Callable, mode
                            sim_config: SimulationConfig, seeds: List[int], T: int, dt: float,
                            v_scale: float = 400.0, omega_scale: float = 10.0,
                            food_reward_multiplier: float = 1000.0,
-                           proximity_reward_scale: float = 1.0, profiler: LightweightProfiler = None) -> List[float]:
+                           proximity_reward_scale: float = 1.0, 
+                           exploration_weight: float = 0.1,
+                           exploration_cell_size: float = 50.0,
+                           exploration_max_bonus: float = 100.0,
+                           exploration_movement_threshold: float = 2.0,
+                           profiler: LightweightProfiler = None) -> List[float]:
     """
     Evaluate fitness using batched simulation across multiple seeds
     
@@ -290,6 +295,13 @@ def rollout_fitness_batched(theta_flat: torch.Tensor, model_ctor: Callable, mode
         # Create batched simulation
         profiler and profiler.start_timer('sim_setup')
         batched_sim = BatchedSimulation(batch_size, sim_config)
+        
+        # Configure exploration parameters
+        batched_sim.exploration_weight = exploration_weight
+        batched_sim.exploration_cell_size = exploration_cell_size
+        batched_sim.exploration_max_bonus = exploration_max_bonus
+        batched_sim.exploration_movement_threshold = exploration_movement_threshold
+        
         batched_sim.reset(seeds)
         profiler and profiler.end_timer('sim_setup')
         
@@ -370,7 +382,11 @@ def rollout_fitness_batched(theta_flat: torch.Tensor, model_ctor: Callable, mode
             proximity_reward = max(0, sim_config.max_range - final_distances[i]) * proximity_reward_scale
             step_penalty = -0.001 * T
             
-            fitness = food_reward + proximity_reward + step_penalty
+            # Get final exploration score for this environment
+            final_step_info = batched_sim.get_state()
+            exploration_bonus = final_step_info['exploration_scores'][i]
+            
+            fitness = food_reward + proximity_reward + step_penalty + exploration_bonus
             fitnesses.append(float(fitness))
         profiler and profiler.end_timer('fitness_calc')
         
@@ -474,6 +490,10 @@ def evaluate_candidate_suite_worker(args):
         omega_scale = fitness_kwargs.get('omega_scale', 10.0)
         fail_weight = fitness_kwargs.get('fail_weight', 0.20)
         proximity_scale = fitness_kwargs.get('proximity_scale', 15.0)
+        exploration_weight = fitness_kwargs.get('exploration_weight', 0.1)
+        exploration_cell_size = fitness_kwargs.get('exploration_cell_size', 50.0)
+        exploration_max_bonus = fitness_kwargs.get('exploration_max_bonus', 100.0)
+        exploration_movement_threshold = fitness_kwargs.get('exploration_movement_threshold', 2.0)
         
         # Evaluate on test suite
         fitness_mean, per_case_scores, metadata = evaluate_candidate_on_suite(
@@ -488,7 +508,11 @@ def evaluate_candidate_suite_worker(args):
             v_scale=v_scale,
             omega_scale=omega_scale,
             fail_weight=fail_weight,
-            proximity_scale=proximity_scale
+            proximity_scale=proximity_scale,
+            exploration_weight=exploration_weight,
+            exploration_cell_size=exploration_cell_size,
+            exploration_max_bonus=exploration_max_bonus,
+            exploration_movement_threshold=exploration_movement_threshold
         )
         
         # Return fitness and diagnostics for the best candidate logging

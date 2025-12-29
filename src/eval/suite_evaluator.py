@@ -27,7 +27,11 @@ def evaluate_candidate_on_suite(
     omega_scale: float = 10.0,
     max_range: float = None,
     fail_weight: float = 0.20,
-    proximity_scale: float = 25.0
+    proximity_scale: float = 25.0,
+    exploration_weight: float = 0.1,
+    exploration_cell_size: float = 50.0,
+    exploration_max_bonus: float = 100.0,
+    exploration_movement_threshold: float = 2.0
 ) -> Tuple[float, np.ndarray, Dict[str, Any]]:
     """
     Evaluate a candidate policy on a test suite
@@ -80,7 +84,8 @@ def evaluate_candidate_on_suite(
         # Evaluate this batch
         batch_scores, batch_reached, batch_diagnostics = _evaluate_test_case_batch(
             model, batch_cases, sim_config, dt, current_batch_size,
-            device, v_scale, omega_scale, max_range, fail_weight, proximity_scale
+            device, v_scale, omega_scale, max_range, fail_weight, proximity_scale,
+            exploration_weight, exploration_cell_size, exploration_max_bonus, exploration_movement_threshold
         )
         
         all_scores.extend(batch_scores)
@@ -141,7 +146,11 @@ def _evaluate_test_case_batch(
     omega_scale: float,
     max_range: float,
     fail_weight: float = 0.20,
-    proximity_scale: float = 25.0
+    proximity_scale: float = 25.0,
+    exploration_weight: float = 0.1,
+    exploration_cell_size: float = 50.0,
+    exploration_max_bonus: float = 100.0,
+    exploration_movement_threshold: float = 2.0
 ) -> Tuple[List[float], List[bool], Dict[str, Any]]:
     """
     Evaluate a batch of test cases with dense progress-based fitness
@@ -164,6 +173,12 @@ def _evaluate_test_case_batch(
     
     # Create batched simulation with world support
     batched_sim, updated_sim_config = setup_simulation_with_worlds(test_cases, sim_config)
+    
+    # Configure exploration parameters
+    batched_sim.exploration_weight = exploration_weight
+    batched_sim.exploration_cell_size = exploration_cell_size
+    batched_sim.exploration_max_bonus = exploration_max_bonus
+    batched_sim.exploration_movement_threshold = exploration_movement_threshold
     
     # Prepare initial states
     agent_states = []
@@ -211,6 +226,8 @@ def _evaluate_test_case_batch(
     step_reached = np.full(batch_size, -1, dtype=int)
     min_distances = initial_distances.copy()  # Initialize with d0
     final_distances = np.zeros(batch_size, dtype=float)
+    exploration_scores = np.zeros(batch_size, dtype=float)
+    unique_cells_visited = np.zeros(batch_size, dtype=int)
     
     # Determine maximum steps for this batch
     max_steps = max(max_steps_list)
@@ -277,6 +294,11 @@ def _evaluate_test_case_batch(
                     reached[i] = True
                     step_reached[i] = step
     
+    # Get final exploration metrics
+    final_step_info = batched_sim.get_state()
+    exploration_scores = final_step_info['exploration_scores']
+    unique_cells_visited = final_step_info['unique_cells_visited']
+    
     # Calculate scores using exponential proximity for fail cases
     scores = []
     pass_times = []
@@ -289,8 +311,7 @@ def _evaluate_test_case_batch(
         if reached[i]:
             # Pass scoring: 1.0 + efficiency bonus [1.0, 2.0]
             efficiency_bonus = (max_steps_list[i] - step_reached[i]) / max_steps_list[i]
-            score = 1.0 + efficiency_bonus
-            pass_times.append(step_reached[i])
+            base_score = 1.0 + efficiency_bonus
         else:
             # Fail scoring: exponential proximity reward [0.0, fail_weight]
             # 
@@ -301,7 +322,7 @@ def _evaluate_test_case_batch(
             #   giving meaningful fitness differences for small improvements in navigation
             min_dist_clamped = max(min_distances[i], 0.0)  # Ensure non-negative
             proximity = np.exp(-min_dist_clamped / proximity_scale)
-            score = fail_weight * proximity
+            base_score = fail_weight * proximity
             
             # Preserve existing bookkeeping for logging/debugging
             d0 = max(initial_distances[i], eps)
@@ -309,7 +330,13 @@ def _evaluate_test_case_batch(
             fail_progresses.append(progress)
             min_dist_ratios.append(min_distances[i] / d0)
         
-        scores.append(score)
+        # Add exploration bonus to both pass and fail cases
+        total_score = base_score + exploration_scores[i]
+        scores.append(total_score)
+        
+        # Track pass times for successful cases
+        if reached[i]:
+            pass_times.append(step_reached[i])
     
     # Compile diagnostics
     diagnostics = {
@@ -319,7 +346,11 @@ def _evaluate_test_case_batch(
         'mean_min_dist_ratio': float(np.mean(min_dist_ratios)) if min_dist_ratios else None,
         'initial_distances': initial_distances.tolist(),
         'min_distances': min_distances.tolist(),
-        'final_distances': final_distances.tolist()
+        'final_distances': final_distances.tolist(),
+        'exploration_scores': exploration_scores.tolist(),
+        'unique_cells_visited': unique_cells_visited.tolist(),
+        'mean_exploration_score': float(np.mean(exploration_scores)),
+        'mean_unique_cells': float(np.mean(unique_cells_visited))
     }
     
     return scores, reached.tolist(), diagnostics

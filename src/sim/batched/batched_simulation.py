@@ -52,6 +52,17 @@ class BatchedSimulation:
         self.food_collected = np.zeros(batch_size, dtype=np.int32)
         self.done = np.zeros(batch_size, dtype=bool)
         
+        # Exploration tracking
+        self.exploration_cell_size = 50.0  # Grid cell size for exploration tracking
+        self.exploration_weight = 0.1  # Weight for exploration bonus in fitness
+        self.exploration_max_bonus = 100.0  # Maximum exploration bonus to prevent dominance
+        self.exploration_movement_threshold = 2.0  # Minimum movement to count as exploration
+        
+        # Per-episode exploration state
+        self.visited_cells = [set() for _ in range(batch_size)]  # Set of (grid_x, grid_y) tuples per env
+        self.last_positions = np.zeros((batch_size, 2), dtype=np.float32)  # Last recorded position for movement check
+        self.exploration_scores = np.zeros(batch_size, dtype=np.float32)  # Cumulative exploration score per env
+        
         # Seed tracking for deterministic food respawning
         self.initial_seeds = np.zeros(batch_size, dtype=np.int64)
         
@@ -96,6 +107,16 @@ class BatchedSimulation:
         self.food_collected.fill(0)
         self.done.fill(False)
         
+        # Reset exploration tracking
+        for i in range(self.B):
+            self.visited_cells[i].clear()
+        self.last_positions.fill(0.0)
+        self.exploration_scores.fill(0.0)
+        
+        # Initialize last positions to current agent positions
+        self.last_positions[:, 0] = self.agent_x.copy()
+        self.last_positions[:, 1] = self.agent_y.copy()
+        
         # Spawn food deterministically for each environment
         self._spawn_food_batch(seeds)
     
@@ -132,6 +153,16 @@ class BatchedSimulation:
         self.step_count.fill(0)
         self.food_collected.fill(0)
         self.done.fill(False)
+        
+        # Reset exploration tracking
+        for i in range(self.B):
+            self.visited_cells[i].clear()
+        self.last_positions.fill(0.0)
+        self.exploration_scores.fill(0.0)
+        
+        # Initialize last positions to current agent positions
+        self.last_positions[:, 0] = self.agent_x.copy()
+        self.last_positions[:, 1] = self.agent_y.copy()
         
         # Set dummy initial seeds for respawn determinism (not used in test cases typically)
         self.initial_seeds = np.arange(self.B, dtype=np.int64)
@@ -202,6 +233,9 @@ class BatchedSimulation:
         self.time += dt
         self.step_count += 1
         
+        # Update exploration tracking
+        self._update_exploration_tracking()
+        
         # Compute vision for all environments
         distances, materials = self._compute_vision_batch()
         
@@ -215,7 +249,9 @@ class BatchedSimulation:
             'food_collected_this_step': food_collected_mask,
             'vision_distances': distances,
             'vision_materials': materials,
-            'done': self.done.copy()
+            'done': self.done.copy(),
+            'exploration_scores': self.exploration_scores.copy(),
+            'unique_cells_visited': np.array([len(cells) for cells in self.visited_cells])
         }
         
         return step_info
@@ -438,6 +474,47 @@ class BatchedSimulation:
         
         return food_collected_mask
     
+    def _update_exploration_tracking(self):
+        """
+        Update exploration tracking for all environments
+        
+        Uses a coarse grid to track visited areas and provides incremental novelty rewards.
+        Only counts movement above a threshold to avoid rewarding stationary behavior.
+        """
+        current_positions = np.stack([self.agent_x, self.agent_y], axis=1)
+        
+        # Check movement threshold to avoid rewarding spinning in place
+        movement_distances = np.linalg.norm(current_positions - self.last_positions, axis=1)
+        moved_mask = movement_distances >= self.exploration_movement_threshold
+        
+        for i in range(self.B):
+            if not moved_mask[i]:
+                continue
+                
+            # Convert position to grid coordinates
+            grid_x = int(self.agent_x[i] // self.exploration_cell_size)
+            grid_y = int(self.agent_y[i] // self.exploration_cell_size)
+            cell = (grid_x, grid_y)
+            
+            # Check if this is a new cell
+            if cell not in self.visited_cells[i]:
+                # First visit - full novelty reward
+                novelty_reward = 1.0
+                self.visited_cells[i].add(cell)
+            else:
+                # Revisit - diminishing returns (could be enhanced with visit counts)
+                novelty_reward = 0.1
+            
+            # Add to exploration score with saturation
+            bonus = self.exploration_weight * novelty_reward
+            self.exploration_scores[i] = min(
+                self.exploration_scores[i] + bonus, 
+                self.exploration_max_bonus
+            )
+        
+        # Update last positions for environments that moved
+        self.last_positions[moved_mask] = current_positions[moved_mask]
+    
     def _respawn_food_for_envs(self, env_mask: np.ndarray):
         """
         Respawn food for specified environments using deterministic seeding
@@ -544,5 +621,7 @@ class BatchedSimulation:
             'food_collected': self.food_collected.copy(),
             'vision_distances': distances,
             'vision_materials': materials,
-            'done': self.done.copy()
+            'done': self.done.copy(),
+            'exploration_scores': self.exploration_scores.copy(),
+            'unique_cells_visited': np.array([len(cells) for cells in self.visited_cells])
         }

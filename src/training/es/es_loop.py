@@ -244,6 +244,15 @@ class EvolutionStrategiesTrainer:
                     'fitness_per_case_median': float(np.median(case_scores)),
                     'fitness_per_case_max': float(np.max(case_scores))
                 })
+            
+            # Add exploration statistics if available
+            mean_exploration_score = best_diagnostics.get('mean_exploration_score')
+            mean_unique_cells = best_diagnostics.get('mean_unique_cells')
+            if mean_exploration_score is not None:
+                stats.update({
+                    'mean_exploration_score': float(mean_exploration_score),
+                    'mean_unique_cells': float(mean_unique_cells)
+                })
         
         return theta_new, stats, best_candidate_theta, best_fitness
     

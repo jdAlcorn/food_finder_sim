@@ -73,6 +73,16 @@ def parse_args():
     parser.add_argument('--proximity-scale', type=float, default=25.0,
                        help='Scale parameter for exponential proximity reward on failed test cases (default: 25.0)')
     
+    # Exploration parameters
+    parser.add_argument('--exploration-weight', type=float, default=0.1,
+                       help='Weight for exploration bonus in fitness (default: 0.1)')
+    parser.add_argument('--exploration-cell-size', type=float, default=50.0,
+                       help='Grid cell size for exploration tracking (default: 50.0)')
+    parser.add_argument('--exploration-max-bonus', type=float, default=100.0,
+                       help='Maximum exploration bonus to prevent dominance (default: 100.0)')
+    parser.add_argument('--exploration-movement-threshold', type=float, default=2.0,
+                       help='Minimum movement distance to count as exploration (default: 2.0)')
+    
     # System parameters
     parser.add_argument('--workers', type=int, default=None,
                        help='Number of worker processes (default: cpu_count//2)')
@@ -263,6 +273,10 @@ def initialize_training(args, run_folder: str) -> tuple:
             'proximity_reward_scale': args.proximity_reward_scale,
             'fail_weight': args.fail_weight,
             'proximity_scale': args.proximity_scale,
+            'exploration_weight': args.exploration_weight,
+            'exploration_cell_size': args.exploration_cell_size,
+            'exploration_max_bonus': args.exploration_max_bonus,
+            'exploration_movement_threshold': args.exploration_movement_threshold,
             'profile_enabled': args.profile_one_candidate_per_gen,
             'profile_candidate_idx': args.profile_candidate_idx,
             'profile_max_steps': args.profile_max_steps,
@@ -373,7 +387,8 @@ def setup_csv_logging(run_folder: str, csv_filename: str):
                    'gradient_norm,param_norm,sigma,alpha,elapsed_time,'
                    'passes_count,mean_pass_time,mean_fail_progress,mean_min_dist_ratio,'
                    'fitness_per_case_min,fitness_per_case_median,fitness_per_case_max,'
-                   'dmin_min,dmin_median,dmin_max\n')
+                   'dmin_min,dmin_median,dmin_max,'
+                   'mean_exploration_score,mean_unique_cells\n')
         
         return csv_path
     return None
@@ -408,9 +423,13 @@ def log_to_csv(csv_path, generation, stats, elapsed_time):
                 line += (f",{stats.get('dmin_min', 0):.2f},"
                         f"{stats.get('dmin_median', 0):.2f},"
                         f"{stats.get('dmin_max', 0):.2f}")
+                
+                # Exploration statistics
+                line += (f",{stats.get('mean_exploration_score', 0):.4f},"
+                        f"{stats.get('mean_unique_cells', 0):.2f}")
             else:
                 # Fill with zeros for respawn mode
-                line += ",0,0,0,0,0,0,0,0,0,0"
+                line += ",0,0,0,0,0,0,0,0,0,0,0,0"
             
             f.write(line + "\n")
 
@@ -431,8 +450,10 @@ def main():
         suite_path = args.test_suite or "data/test_suites/basic_v1.json"
         print(f"Test suite: {suite_path}")
         print(f"Fail weight: {args.fail_weight} (progress-based fitness for failed cases)")
+        print(f"Exploration: weight={args.exploration_weight}, cell_size={args.exploration_cell_size}, max_bonus={args.exploration_max_bonus}")
     else:
         print(f"Seeds per candidate: {args.eval_seeds}")
+        print(f"Exploration: weight={args.exploration_weight}, cell_size={args.exploration_cell_size}, max_bonus={args.exploration_max_bonus}")
     print(f"Batched evaluation: Always enabled")
     batch_size = args.eval_batch_size or args.eval_seeds
     print(f"Eval batch size: {batch_size}")
@@ -566,6 +587,12 @@ def main():
                                f"med={stats['dmin_median']:6.1f} "
                                f"max={stats['dmin_max']:6.1f}")
                     base_log += dmin_log
+                
+                # Add exploration statistics if available
+                if 'mean_exploration_score' in stats:
+                    exploration_log = (f" | explore: score={stats['mean_exploration_score']:6.2f} "
+                                      f"cells={stats['mean_unique_cells']:5.1f}")
+                    base_log += exploration_log
                 
                 print(base_log)
             
