@@ -204,7 +204,7 @@ class EvolutionStrategiesTrainer:
         # Compile statistics
         stats = {
             'fitness_mean': float(fitness_mean),
-            'fitness_std': float(fitness_std),
+            'fitness_std': float(fitness_std_raw),
             'fitness_max': float(np.max(fitnesses)),
             'fitness_min': float(np.min(fitnesses)),
             'fitness_median': float(np.median(fitnesses)),
