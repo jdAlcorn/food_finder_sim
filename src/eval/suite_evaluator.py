@@ -94,6 +94,7 @@ def evaluate_candidate_on_suite(
     all_pass_times = []
     all_fail_progresses = []
     all_min_dist_ratios = []
+    all_min_distances = []
     
     for d in all_diagnostics:
         if d['mean_pass_time'] is not None:
@@ -105,9 +106,14 @@ def evaluate_candidate_on_suite(
         if d['mean_min_dist_ratio'] is not None:
             fail_count = len(test_cases) // len(all_diagnostics) - d['passes_count']
             all_min_dist_ratios.extend([d['mean_min_dist_ratio']] * fail_count)
+        
+        # Collect all min distances for per-case analysis
+        all_min_distances.extend(d['min_distances'])
     
     metadata = {
         'per_case_reached': np.array(all_reached),
+        'per_case_scores': per_case_scores,
+        'per_case_min_distances': np.array(all_min_distances),
         'num_reached': int(np.sum(all_reached)),
         'num_total': len(test_cases),
         'success_rate': float(np.mean(all_reached)),

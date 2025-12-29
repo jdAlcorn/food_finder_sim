@@ -88,8 +88,8 @@ def parse_args():
                        help='Resume from checkpoint file')
     
     # Logging parameters
-    parser.add_argument('--log-interval', type=int, default=10,
-                       help='Print stats every N generations (default: 10)')
+    parser.add_argument('--log-interval', type=int, default=1,
+                       help='Print stats every N generations (default: 1)')
     parser.add_argument('--csv-log', type=str, default=None,
                        help='CSV filename to log training statistics (default: training_log.csv, saved in run folder)')
     
@@ -364,8 +364,11 @@ def setup_csv_logging(run_folder: str, csv_filename: str):
         
         # Write header (will overwrite existing file)
         with open(csv_path, 'w') as f:
-            f.write('generation,fitness_mean,fitness_std,fitness_max,fitness_min,best_fitness,'
-                   'gradient_norm,param_norm,sigma,alpha,elapsed_time\n')
+            f.write('generation,fitness_mean,fitness_std,fitness_max,fitness_min,fitness_median,best_fitness,'
+                   'gradient_norm,param_norm,sigma,alpha,elapsed_time,'
+                   'passes_count,mean_pass_time,mean_fail_progress,mean_min_dist_ratio,'
+                   'fitness_per_case_min,fitness_per_case_median,fitness_per_case_max,'
+                   'dmin_min,dmin_median,dmin_max\n')
         
         return csv_path
     return None
@@ -375,10 +378,36 @@ def log_to_csv(csv_path, generation, stats, elapsed_time):
     """Log statistics to CSV"""
     if csv_path:
         with open(csv_path, 'a') as f:
-            f.write(f"{generation},{stats['fitness_mean']:.4f},{stats['fitness_std']:.4f},"
-                   f"{stats['fitness_max']:.4f},{stats['fitness_min']:.4f},{stats['best_fitness']:.4f},"
+            # Basic stats
+            line = (f"{generation},{stats['fitness_mean']:.4f},{stats['fitness_std']:.4f},"
+                   f"{stats['fitness_max']:.4f},{stats['fitness_min']:.4f},"
+                   f"{stats.get('fitness_median', 0):.4f},{stats['best_fitness']:.4f},"
                    f"{stats['gradient_norm']:.6f},{stats['param_norm']:.4f},"
-                   f"{stats['sigma']:.6f},{stats['alpha']:.6f},{elapsed_time:.2f}\n")
+                   f"{stats['sigma']:.6f},{stats['alpha']:.6f},{elapsed_time:.2f}")
+            
+            # Suite-specific stats
+            if 'passes_count' in stats:
+                pass_time = stats.get('mean_pass_time') or 0
+                fail_prog = stats.get('mean_fail_progress') or 0
+                min_dist_ratio = stats.get('mean_min_dist_ratio') or 0
+                
+                line += (f",{stats['passes_count']},{pass_time:.2f},"
+                        f"{fail_prog:.4f},{min_dist_ratio:.4f}")
+                
+                # Per-case fitness distribution
+                line += (f",{stats.get('fitness_per_case_min', 0):.4f},"
+                        f"{stats.get('fitness_per_case_median', 0):.4f},"
+                        f"{stats.get('fitness_per_case_max', 0):.4f}")
+                
+                # Per-case min distance distribution
+                line += (f",{stats.get('dmin_min', 0):.2f},"
+                        f"{stats.get('dmin_median', 0):.2f},"
+                        f"{stats.get('dmin_max', 0):.2f}")
+            else:
+                # Fill with zeros for respawn mode
+                line += ",0,0,0,0,0,0,0,0,0,0"
+            
+            f.write(line + "\n")
 
 
 def main():
@@ -501,6 +530,13 @@ def main():
                            f"time={gen_elapsed:5.2f}s "
                            f"total={total_elapsed/60:5.1f}m")
                 
+                # Add population fitness distribution
+                if 'fitness_median' in stats:
+                    fitness_dist_log = (f" | fit_dist: min={stats['fitness_min']:6.2f} "
+                                       f"med={stats['fitness_median']:6.2f} "
+                                       f"max={stats['fitness_max']:6.2f}")
+                    base_log += fitness_dist_log
+                
                 # Add suite diagnostics if available
                 if 'passes_count' in stats:
                     suite_log = (f" | passes={stats['passes_count']}")
@@ -511,6 +547,20 @@ def main():
                     if stats.get('mean_min_dist_ratio') is not None:
                         suite_log += f" min_dist_ratio={stats['mean_min_dist_ratio']:.3f}"
                     base_log += suite_log
+                
+                # Add per-case fitness distribution if available
+                if 'fitness_per_case_min' in stats:
+                    case_fitness_log = (f" | case_fit: min={stats['fitness_per_case_min']:6.2f} "
+                                       f"med={stats['fitness_per_case_median']:6.2f} "
+                                       f"max={stats['fitness_per_case_max']:6.2f}")
+                    base_log += case_fitness_log
+                
+                # Add per-case min distance distribution if available
+                if 'dmin_min' in stats:
+                    dmin_log = (f" | dmin: min={stats['dmin_min']:6.1f} "
+                               f"med={stats['dmin_median']:6.1f} "
+                               f"max={stats['dmin_max']:6.1f}")
+                    base_log += dmin_log
                 
                 print(base_log)
             

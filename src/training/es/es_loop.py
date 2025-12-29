@@ -197,6 +197,7 @@ class EvolutionStrategiesTrainer:
             'fitness_std': float(fitness_std),
             'fitness_max': float(np.max(fitnesses)),
             'fitness_min': float(np.min(fitnesses)),
+            'fitness_median': float(np.median(fitnesses)),
             'best_fitness': float(best_fitness),
             'gradient_norm': float(np.linalg.norm(gradient)),
             'param_norm': float(torch.norm(theta_flat).item()),
@@ -213,6 +214,26 @@ class EvolutionStrategiesTrainer:
                 'mean_min_dist_ratio': best_diagnostics.get('mean_min_dist_ratio'),
                 'fail_weight': best_diagnostics.get('fail_weight', 0.20)
             })
+            
+            # Add per-case min distance statistics if available
+            per_case_min_distances = best_diagnostics.get('per_case_min_distances')
+            if per_case_min_distances is not None:
+                min_dists = np.array(per_case_min_distances)
+                stats.update({
+                    'dmin_min': float(np.min(min_dists)),
+                    'dmin_median': float(np.median(min_dists)),
+                    'dmin_max': float(np.max(min_dists))
+                })
+            
+            # Add per-case fitness statistics if available  
+            per_case_scores = best_diagnostics.get('per_case_scores')
+            if per_case_scores is not None:
+                case_scores = np.array(per_case_scores)
+                stats.update({
+                    'fitness_per_case_min': float(np.min(case_scores)),
+                    'fitness_per_case_median': float(np.median(case_scores)),
+                    'fitness_per_case_max': float(np.max(case_scores))
+                })
         
         return theta_new, stats, best_candidate_theta, best_fitness
     
