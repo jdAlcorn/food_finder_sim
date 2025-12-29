@@ -548,19 +548,19 @@ def main():
             if generation % args.log_interval == 0 or generation == start_generation:
                 total_elapsed = time.time() - start_time
                 base_log = (f"Gen {generation:4d}: "
-                           f"mean={stats['fitness_mean']:7.2f} "
-                           f"best={stats['best_fitness']:7.2f} "
-                           f"best_ever={best_fitness_so_far:7.2f} "
-                           f"std={stats['fitness_std']:6.2f} "
-                           f"grad_norm={stats['gradient_norm']:8.4f} "
+                           f"mean={stats['fitness_mean']:9.4f} "
+                           f"best={stats['best_fitness']:9.4f} "
+                           f"best_ever={best_fitness_so_far:9.4f} "
+                           f"std={stats['fitness_std']:8.4f} "
+                           f"grad_norm={stats['gradient_norm']:10.6f} "
                            f"time={gen_elapsed:5.2f}s "
                            f"total={total_elapsed/60:5.1f}m")
                 
                 # Add population fitness distribution
                 if 'fitness_median' in stats:
-                    fitness_dist_log = (f" | fit_dist: min={stats['fitness_min']:6.2f} "
-                                       f"med={stats['fitness_median']:6.2f} "
-                                       f"max={stats['fitness_max']:6.2f}")
+                    fitness_dist_log = (f" | fit_dist: min={stats['fitness_min']:8.4f} "
+                                       f"med={stats['fitness_median']:8.4f} "
+                                       f"max={stats['fitness_max']:8.4f}")
                     base_log += fitness_dist_log
                 
                 # Add suite diagnostics if available
@@ -569,16 +569,16 @@ def main():
                     if stats.get('mean_pass_time') is not None:
                         suite_log += f" pass_time={stats['mean_pass_time']:.1f}"
                     if stats.get('mean_fail_progress') is not None:
-                        suite_log += f" fail_prog={stats['mean_fail_progress']:.3f}"
+                        suite_log += f" fail_prog={stats['mean_fail_progress']:.6f}"
                     if stats.get('mean_min_dist_ratio') is not None:
-                        suite_log += f" min_dist_ratio={stats['mean_min_dist_ratio']:.3f}"
+                        suite_log += f" min_dist_ratio={stats['mean_min_dist_ratio']:.6f}"
                     base_log += suite_log
                 
                 # Add per-case fitness distribution if available
                 if 'fitness_per_case_min' in stats:
-                    case_fitness_log = (f" | case_fit: min={stats['fitness_per_case_min']:6.2f} "
-                                       f"med={stats['fitness_per_case_median']:6.2f} "
-                                       f"max={stats['fitness_per_case_max']:6.2f}")
+                    case_fitness_log = (f" | case_fit: min={stats['fitness_per_case_min']:8.4f} "
+                                       f"med={stats['fitness_per_case_median']:8.4f} "
+                                       f"max={stats['fitness_per_case_max']:8.4f}")
                     base_log += case_fitness_log
                 
                 # Add per-case min distance distribution if available
@@ -590,8 +590,8 @@ def main():
                 
                 # Add exploration statistics if available
                 if 'mean_exploration_score' in stats:
-                    exploration_log = (f" | explore: score={stats['mean_exploration_score']:6.2f} "
-                                      f"cells={stats['mean_unique_cells']:5.1f}")
+                    exploration_log = (f" | explore: score={stats['mean_exploration_score']:8.4f} "
+                                      f"cells={stats['mean_unique_cells']:7.4f}")
                     base_log += exploration_log
                 
                 print(base_log)
