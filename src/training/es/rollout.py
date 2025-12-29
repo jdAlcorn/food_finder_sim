@@ -473,6 +473,7 @@ def evaluate_candidate_suite_worker(args):
         v_scale = fitness_kwargs.get('v_scale', 400.0)
         omega_scale = fitness_kwargs.get('omega_scale', 10.0)
         fail_weight = fitness_kwargs.get('fail_weight', 0.20)
+        proximity_scale = fitness_kwargs.get('proximity_scale', 15.0)
         
         # Evaluate on test suite
         fitness_mean, per_case_scores, metadata = evaluate_candidate_on_suite(
@@ -486,7 +487,8 @@ def evaluate_candidate_suite_worker(args):
             device="cpu",  # Force CPU for multiprocessing compatibility
             v_scale=v_scale,
             omega_scale=omega_scale,
-            fail_weight=fail_weight
+            fail_weight=fail_weight,
+            proximity_scale=proximity_scale
         )
         
         # Return fitness and diagnostics for the best candidate logging

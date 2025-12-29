@@ -26,7 +26,8 @@ def evaluate_candidate_on_suite(
     v_scale: float = 400.0,
     omega_scale: float = 10.0,
     max_range: float = None,
-    fail_weight: float = 0.20
+    fail_weight: float = 0.20,
+    proximity_scale: float = 15.0
 ) -> Tuple[float, np.ndarray, Dict[str, Any]]:
     """
     Evaluate a candidate policy on a test suite
@@ -44,6 +45,7 @@ def evaluate_candidate_on_suite(
         omega_scale: Angular velocity normalization scale
         max_range: Maximum range for proximity scoring (default: sim_config.max_range)
         fail_weight: Weight for progress score on failed test cases (default: 0.20)
+        proximity_scale: Scale parameter for exponential proximity reward (default: 15.0)
         
     Returns:
         Tuple of (fitness_mean, per_case_scores, metadata)
@@ -78,7 +80,7 @@ def evaluate_candidate_on_suite(
         # Evaluate this batch
         batch_scores, batch_reached, batch_diagnostics = _evaluate_test_case_batch(
             model, batch_cases, sim_config, dt, current_batch_size,
-            device, v_scale, omega_scale, max_range, fail_weight
+            device, v_scale, omega_scale, max_range, fail_weight, proximity_scale
         )
         
         all_scores.extend(batch_scores)
@@ -138,7 +140,8 @@ def _evaluate_test_case_batch(
     v_scale: float,
     omega_scale: float,
     max_range: float,
-    fail_weight: float = 0.20
+    fail_weight: float = 0.20,
+    proximity_scale: float = 15.0
 ) -> Tuple[List[float], List[bool], Dict[str, Any]]:
     """
     Evaluate a batch of test cases with dense progress-based fitness
@@ -146,6 +149,7 @@ def _evaluate_test_case_batch(
     
     Args:
         fail_weight: Weight for progress score on failed test cases (default: 0.20)
+        proximity_scale: Scale parameter for exponential proximity reward (default: 15.0)
     
     Returns:
         Tuple of (scores, reached_flags, diagnostics)
@@ -273,7 +277,7 @@ def _evaluate_test_case_batch(
                     reached[i] = True
                     step_reached[i] = step
     
-    # Calculate scores using the new dense fitness function
+    # Calculate scores using exponential proximity for fail cases
     scores = []
     pass_times = []
     fail_progresses = []
@@ -288,10 +292,20 @@ def _evaluate_test_case_batch(
             score = 1.0 + efficiency_bonus
             pass_times.append(step_reached[i])
         else:
-            # Fail scoring: progress-based dense reward [0.0, fail_weight]
+            # Fail scoring: exponential proximity reward [0.0, fail_weight]
+            # 
+            # WHY exponential proximity:
+            # - Relative progress (1 - min_dist/initial_dist) saturates near 1.0 when 
+            #   initial distances are large, collapsing fitness variance
+            # - Exponential proximity exp(-min_dist/scale) increases resolution near the goal,
+            #   giving meaningful fitness differences for small improvements in navigation
+            min_dist_clamped = max(min_distances[i], 0.0)  # Ensure non-negative
+            proximity = np.exp(-min_dist_clamped / proximity_scale)
+            score = fail_weight * proximity
+            
+            # Preserve existing bookkeeping for logging/debugging
             d0 = max(initial_distances[i], eps)
             progress = np.clip(1.0 - (min_distances[i] / d0), 0.0, 1.0)
-            score = fail_weight * progress
             fail_progresses.append(progress)
             min_dist_ratios.append(min_distances[i] / d0)
         

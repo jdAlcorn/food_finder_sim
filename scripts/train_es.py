@@ -70,6 +70,8 @@ def parse_args():
                        help='Scale factor for proximity reward (default: 1.0)')
     parser.add_argument('--fail-weight', type=float, default=0.20,
                        help='Weight for progress-based fitness on failed test cases (default: 0.20, range [0,0.2])')
+    parser.add_argument('--proximity-scale', type=float, default=15.0,
+                       help='Scale parameter for exponential proximity reward on failed test cases (default: 15.0)')
     
     # System parameters
     parser.add_argument('--workers', type=int, default=None,
@@ -260,6 +262,7 @@ def initialize_training(args, run_folder: str) -> tuple:
             'food_reward_multiplier': args.food_reward,
             'proximity_reward_scale': args.proximity_reward_scale,
             'fail_weight': args.fail_weight,
+            'proximity_scale': args.proximity_scale,
             'profile_enabled': args.profile_one_candidate_per_gen,
             'profile_candidate_idx': args.profile_candidate_idx,
             'profile_max_steps': args.profile_max_steps,
@@ -316,6 +319,8 @@ def save_checkpoint(run_folder: str, args, generation, theta, best_theta, best_f
         'hidden_dims': args.hidden_dims,
         'v_scale': args.v_scale,
         'omega_scale': args.omega_scale,
+        'fail_weight': args.fail_weight,
+        'proximity_scale': args.proximity_scale,
         'total_parameters': theta.numel(),
         'run_folder': os.path.basename(run_folder),  # Store run folder name for reference
         'stats_history': stats_history[-10:] if len(stats_history) > 10 else stats_history  # Last 10 entries
