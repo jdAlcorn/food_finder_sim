@@ -229,6 +229,56 @@ def save_checkpoint_with_training_state(run_dir: str, args, episode: int, policy
     return checkpoint_path
 
 
+def setup_csv_logging(run_dir: str, csv_filename: str) -> str:
+    """Setup CSV logging in the run folder"""
+    if csv_filename:
+        csv_path = os.path.join(run_dir, csv_filename)
+    else:
+        csv_path = os.path.join(run_dir, "training_log.csv")
+    
+    # Write header (will overwrite existing file)
+    with open(csv_path, 'w') as f:
+        f.write('episode,test_case_id,reward,avg_reward_100,best_reward,episode_length,'
+               'success,success_step,success_rate_100,total_terminal_reward,'
+               'total_reacquire_bonus,total_progress_reward,total_step_penalty,'
+               'min_food_distance_seen,final_food_distance,food_visible_fraction,'
+               'policy_loss,value_loss,entropy,total_loss,grad_norm_pre_clip,'
+               'grad_norm_post_clip,gru_grad_norm,training_time_elapsed\n')
+    
+    return csv_path
+
+
+def log_to_csv(csv_path: str, episode: int, current_test_case_id: str, episode_info: Dict[str, Any], 
+               episode_reward: float, avg_reward: float, best_reward: float, success_rate: float,
+               train_metrics: Dict[str, float], training_time_elapsed: float):
+    """Log episode statistics to CSV"""
+    if csv_path:
+        with open(csv_path, 'a') as f:
+            # Format success step (N/A if None)
+            success_step = episode_info['success_step'] if episode_info['success_step'] is not None else -1
+            
+            # Format distance values (N/A if None)
+            min_dist = episode_info['min_food_distance_seen'] if episode_info['min_food_distance_seen'] is not None else -1
+            final_dist = episode_info['final_food_distance'] if episode_info['final_food_distance'] is not None else -1
+            
+            line = (f"{episode},{current_test_case_id},{episode_reward:.6f},{avg_reward:.6f},"
+                   f"{best_reward:.6f},{episode_info['episode_length']},"
+                   f"{1 if episode_info['success'] else 0},{success_step},{success_rate:.6f},"
+                   f"{episode_info['total_terminal_reward']:.6f},"
+                   f"{episode_info['total_reacquire_bonus']:.6f},"
+                   f"{episode_info['total_progress_reward']:.6f},"
+                   f"{episode_info['total_step_penalty']:.6f},"
+                   f"{min_dist:.6f},{final_dist:.6f},"
+                   f"{episode_info['food_visible_fraction']:.6f},"
+                   f"{train_metrics['policy_loss']:.6f},{train_metrics['value_loss']:.6f},"
+                   f"{train_metrics['entropy']:.6f},{train_metrics['total_loss']:.6f},"
+                   f"{train_metrics['grad_norm_pre_clip']:.6f},"
+                   f"{train_metrics['grad_norm_post_clip']:.6f},"
+                   f"{train_metrics['gru_grad_norm']:.6f},{training_time_elapsed:.2f}\n")
+            
+            f.write(line)
+
+
 # Note: respawn_food function removed as episodes now terminate on food collection
 
 
@@ -751,6 +801,10 @@ def main():
                        help='Save checkpoint every N episodes (default: 100)')
     parser.add_argument('--log-interval', type=int, default=10,
                        help='Log progress every N episodes (default: 10)')
+    parser.add_argument('--detailed-log-interval', type=int, default=50,
+                       help='Log detailed diagnostics every N episodes (default: 50)')
+    parser.add_argument('--csv-log', type=str, default=None,
+                       help='CSV filename to log training statistics (default: training_log.csv, saved in run folder)')
     parser.add_argument('--resume', type=str, default=None,
                        help='Resume from checkpoint file')
     
@@ -859,6 +913,10 @@ def main():
     policy, optimizer, start_episode, best_reward, episode_rewards, episode_lengths, food_collected_counts = initialize_policy_and_optimizer(args)
     
     print(f"Saving to: {run_dir}")
+    
+    # Setup CSV logging
+    csv_path = setup_csv_logging(run_dir, args.csv_log)
+    print(f"CSV logging to: {csv_path}")
     print()
     
     # Training loop
@@ -907,6 +965,16 @@ def main():
         episode_lengths.append(episode_length)
         food_collected_counts.append(food_collected)
         
+        # Calculate metrics for CSV logging
+        avg_reward = np.mean(episode_rewards) if episode_rewards else 0
+        recent_episodes = min(100, len(food_collected_counts))
+        recent_successes = sum(1 for x in list(food_collected_counts)[-recent_episodes:] if x > 0)
+        success_rate = recent_successes / recent_episodes if recent_episodes > 0 else 0.0
+        
+        # Log to CSV
+        log_to_csv(csv_path, episode, current_test_case.id, episode_info, episode_reward, 
+                   avg_reward, best_reward, success_rate, train_metrics, time.time() - start_time)
+        
         # Update best reward
         if episode_reward > best_reward:
             best_reward = episode_reward
@@ -919,14 +987,8 @@ def main():
         
         # Logging with detailed diagnostics
         if episode % args.log_interval == 0:
-            avg_reward = np.mean(episode_rewards) if episode_rewards else 0
             avg_length = np.mean(episode_lengths) if episode_lengths else 0
             avg_food = np.mean(food_collected_counts) if food_collected_counts else 0
-            
-            # Success rate over last 100 episodes
-            recent_episodes = min(100, len(food_collected_counts))
-            recent_successes = sum(1 for x in list(food_collected_counts)[-recent_episodes:] if x > 0)
-            success_rate = recent_successes / recent_episodes if recent_episodes > 0 else 0.0
             
             print(f"Episode {episode:5d} | "
                   f"Case: {current_test_case.id[:20]:20s} | "
@@ -938,8 +1000,8 @@ def main():
                   f"Step: {episode_info['success_step'] if episode_info['success_step'] is not None else 'N/A'} | "
                   f"SR: {success_rate:.2f}")
             
-            # Detailed diagnostics every 50 episodes
-            if episode % (args.log_interval * 5) == 0:
+            # Detailed diagnostics
+            if episode % args.detailed_log_interval == 0:
                 print(f"  Rewards: T={episode_info['total_terminal_reward']:.1f}, "
                       f"R={episode_info['total_reacquire_bonus']:.1f}, "  # R for Reacquire
                       f"P={episode_info['total_progress_reward']:.1f}, "
