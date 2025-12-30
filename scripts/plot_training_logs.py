@@ -226,7 +226,7 @@ def plot_test_case_performance_over_time(df: pd.DataFrame, save_dir: str = None)
 
 
 def plot_test_case_distribution(df: pd.DataFrame, save_dir: str = None):
-    """Plot test case distribution if using scheduler"""
+    """Plot test case success rates and distribution"""
     unique_cases = df['test_case_id'].nunique()
     
     if unique_cases == 1:
@@ -234,33 +234,66 @@ def plot_test_case_distribution(df: pd.DataFrame, save_dir: str = None):
         return
     
     fig, axes = plt.subplots(1, 2, figsize=(15, 6))
-    fig.suptitle(f'Test Case Distribution ({unique_cases} different cases)', fontsize=16)
+    fig.suptitle(f'Test Case Analysis ({unique_cases} different cases)', fontsize=16)
     
-    # Test case frequency
-    case_counts = df['test_case_id'].value_counts()
-    axes[0].pie(case_counts.values, labels=case_counts.index, autopct='%1.1f%%', startangle=90)
-    axes[0].set_title('Test Case Usage Distribution')
+    # Calculate success rates and counts by test case
+    case_stats = df.groupby('test_case_id').agg({
+        'success': ['mean', 'sum', 'count']
+    }).reset_index()
+    case_stats.columns = ['test_case_id', 'success_rate', 'successes', 'total_episodes']
     
-    # Success rate by test case
-    success_by_case = df.groupby('test_case_id')['success'].agg(['mean', 'count']).reset_index()
-    success_by_case = success_by_case[success_by_case['count'] >= 5]  # Only cases with 5+ episodes
+    # Filter out cases with very few episodes for the pie chart
+    case_stats_filtered = case_stats[case_stats['total_episodes'] >= 3]
     
-    if len(success_by_case) > 0:
-        bars = axes[1].bar(range(len(success_by_case)), success_by_case['mean'] * 100)
-        axes[1].set_xlabel('Test Case')
-        axes[1].set_ylabel('Success Rate (%)')
-        axes[1].set_title('Success Rate by Test Case')
-        axes[1].set_xticks(range(len(success_by_case)))
-        axes[1].set_xticklabels([case[:15] + '...' if len(case) > 15 else case 
-                                for case in success_by_case['test_case_id']], rotation=45)
-        axes[1].grid(True, alpha=0.3)
-        
-        # Add count labels on bars
-        for i, (bar, count) in enumerate(zip(bars, success_by_case['count'])):
-            axes[1].text(bar.get_x() + bar.get_width()/2, bar.get_height() + 1, 
-                        f'n={count}', ha='center', va='bottom', fontsize=8)
+    if len(case_stats_filtered) == 0:
+        axes[0].text(0.5, 0.5, 'Insufficient data\n(need 3+ episodes per case)', 
+                    ha='center', va='center', transform=axes[0].transAxes)
+        axes[0].set_title('Success Rate Distribution')
     else:
-        axes[1].text(0.5, 0.5, 'Insufficient data\n(need 5+ episodes per case)', 
+        # Success rate pie chart
+        success_rates = case_stats_filtered['success_rate'] * 100
+        labels = [f"{case[:15]}{'...' if len(case) > 15 else ''}\n{rate:.1f}%" 
+                 for case, rate in zip(case_stats_filtered['test_case_id'], success_rates)]
+        
+        # Color by success rate (green = high success, red = low success)
+        colors = plt.cm.RdYlGn(success_rates / 100)  # Normalize to 0-1 for colormap
+        
+        wedges, texts, autotexts = axes[0].pie(case_stats_filtered['total_episodes'], 
+                                              labels=labels, autopct='', startangle=90,
+                                              colors=colors)
+        axes[0].set_title('Success Rate by Test Case\n(Size = Episode Count)')
+        
+        # Add a color bar to show the success rate scale
+        sm = plt.cm.ScalarMappable(cmap=plt.cm.RdYlGn, norm=plt.Normalize(vmin=0, vmax=100))
+        sm.set_array([])
+        cbar = plt.colorbar(sm, ax=axes[0], shrink=0.8)
+        cbar.set_label('Success Rate (%)')
+    
+    # Success rate bar chart (keep this as it's useful)
+    if len(case_stats) > 0:
+        # Sort by success rate for better visualization
+        case_stats_sorted = case_stats.sort_values('success_rate', ascending=True)
+        
+        bars = axes[1].barh(range(len(case_stats_sorted)), case_stats_sorted['success_rate'] * 100)
+        axes[1].set_xlabel('Success Rate (%)')
+        axes[1].set_ylabel('Test Case')
+        axes[1].set_title('Success Rate by Test Case')
+        axes[1].set_yticks(range(len(case_stats_sorted)))
+        axes[1].set_yticklabels([case[:20] + '...' if len(case) > 20 else case 
+                                for case in case_stats_sorted['test_case_id']])
+        axes[1].grid(True, alpha=0.3, axis='x')
+        axes[1].set_xlim(0, 100)
+        
+        # Color bars by success rate
+        for bar, rate in zip(bars, case_stats_sorted['success_rate'] * 100):
+            bar.set_color(plt.cm.RdYlGn(rate / 100))
+        
+        # Add episode count labels on bars
+        for i, (bar, count) in enumerate(zip(bars, case_stats_sorted['total_episodes'])):
+            axes[1].text(bar.get_width() + 1, bar.get_y() + bar.get_height()/2, 
+                        f'n={count}', ha='left', va='center', fontsize=8)
+    else:
+        axes[1].text(0.5, 0.5, 'No data available', 
                     ha='center', va='center', transform=axes[1].transAxes)
         axes[1].set_title('Success Rate by Test Case')
     

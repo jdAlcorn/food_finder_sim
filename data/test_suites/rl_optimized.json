@@ -1,0 +1,128 @@
+{
+  "suite_id": "rl_optimized",
+  "version": "1.0",
+  "description": "Custom test suite created interactively",
+  "test_cases": [
+    {
+      "id": "food_on_left",
+      "max_steps": 600,
+      "dt": null,
+      "agent_start": {
+        "x": 400.0,
+        "y": 400.0,
+        "theta": 0.0,
+        "vx": 0.0,
+        "vy": 0.0,
+        "omega": 0.0,
+        "throttle": 0.0
+      },
+      "food": {
+        "x": 600.0,
+        "y": 200.0,
+        "radius": 8.0
+      },
+      "notes": "Custom test case created interactively",
+      "obstacles": {
+        "circles": [],
+        "segments": []
+      }
+    },
+    {
+      "id": "food_on_right",
+      "max_steps": 600,
+      "dt": null,
+      "agent_start": {
+        "x": 400.0,
+        "y": 400.0,
+        "theta": -1.4000000000000001,
+        "vx": 0.0,
+        "vy": 0.0,
+        "omega": 0.0,
+        "throttle": 0.0
+      },
+      "food": {
+        "x": 600.0,
+        "y": 200.0,
+        "radius": 8.0
+      },
+      "notes": "Custom test case created interactively",
+      "obstacles": {
+        "circles": [],
+        "segments": []
+      }
+    },
+    {
+      "id": "food_centerish",
+      "max_steps": 600,
+      "dt": null,
+      "agent_start": {
+        "x": 400.0,
+        "y": 400.0,
+        "theta": -0.7,
+        "vx": 0.0,
+        "vy": 0.0,
+        "omega": 0.0,
+        "throttle": 0.0
+      },
+      "food": {
+        "x": 600.0,
+        "y": 200.0,
+        "radius": 8.0
+      },
+      "notes": "Custom test case created interactively",
+      "obstacles": {
+        "circles": [],
+        "segments": []
+      }
+    },
+    {
+      "id": "food_close_left",
+      "max_steps": 600,
+      "dt": null,
+      "agent_start": {
+        "x": 485.0,
+        "y": 260.0,
+        "theta": 0.0,
+        "vx": 0.0,
+        "vy": 0.0,
+        "omega": 0.0,
+        "throttle": 0.0
+      },
+      "food": {
+        "x": 600.0,
+        "y": 200.0,
+        "radius": 8.0
+      },
+      "notes": "Custom test case created interactively",
+      "obstacles": {
+        "circles": [],
+        "segments": []
+      }
+    },
+    {
+      "id": "food_close_right",
+      "max_steps": 600,
+      "dt": null,
+      "agent_start": {
+        "x": 495.0,
+        "y": 260.0,
+        "theta": -1.2,
+        "vx": 0.0,
+        "vy": 0.0,
+        "omega": 0.0,
+        "throttle": 0.0
+      },
+      "food": {
+        "x": 600.0,
+        "y": 200.0,
+        "radius": 8.0
+      },
+      "notes": "Custom test case created interactively",
+      "world_id": "default_empty",
+      "obstacles": {
+        "circles": [],
+        "segments": []
+      }
+    }
+  ]
+}
