@@ -120,7 +120,7 @@ def main():
     parser.add_argument('--suite', type=str, default=None,
                        help='Path to test suite JSON file')
     parser.add_argument('--case-id', type=str, default=None,
-                       help='ID of test case to play (requires --suite)')
+                       help='ID of test case to play (requires --suite). If not specified, cycles through all cases in suite.')
     
     # World options
     parser.add_argument('--world', type=str, default=None,
@@ -144,31 +144,42 @@ def main():
             print(f"  - {world_id}")
         return
     
-    # Validate arguments
-    if args.case_id and not args.suite:
-        print("Error: --case-id requires --suite")
-        sys.exit(1)
-    
     print("Simulation Player")
     print("=" * 50)
     
-    # Load test case if specified
-    test_case = None
-    if args.suite and args.case_id:
+    # Load test suite and cases
+    test_suite = None
+    test_cases = []
+    current_test_case_index = 0
+    
+    if args.suite:
         try:
-            suite = load_suite(args.suite)
-            test_case = suite.get_case_by_id(args.case_id)
-            if test_case is None:
-                print(f"Test case '{args.case_id}' not found in suite")
+            test_suite = load_suite(args.suite)
+            
+            if args.case_id:
+                # Single test case mode
+                test_case = test_suite.get_case_by_id(args.case_id)
+                if test_case is None:
+                    print(f"Test case '{args.case_id}' not found in suite")
+                    print("Available test cases:")
+                    for case in test_suite.test_cases:
+                        print(f"  - {case.id}: {case.notes}")
+                    return
+                test_cases = [test_case]
+                print(f"Test case: {test_case.id}")
+                print(f"Description: {test_case.notes}")
+                print(f"Max steps: {test_case.max_steps}")
+            else:
+                # Multi test case mode - cycle through all
+                test_cases = test_suite.test_cases
+                print(f"Test suite: {test_suite.suite_id} v{test_suite.version}")
+                print(f"Loaded {len(test_cases)} test cases for cycling")
                 print("Available test cases:")
-                for case in suite.test_cases:
-                    print(f"  - {case.id}: {case.notes}")
-                return
-            
-            print(f"Test case: {test_case.id}")
-            print(f"Description: {test_case.notes}")
-            print(f"Max steps: {test_case.max_steps}")
-            
+                for i, case in enumerate(test_cases):
+                    print(f"  {i+1}. {case.id}: {case.notes}")
+                print()
+                print("Use N/P keys to cycle through test cases")
+                
         except Exception as e:
             print(f"Error loading test suite: {e}")
             return
@@ -215,12 +226,13 @@ def main():
     
     print()
     
-    # Set up simulation
+    # Set up initial simulation
     sim = None
+    current_test_case = test_cases[0] if test_cases else None
     
     # Priority: test case > explicit world > default
-    if test_case:
-        sim, config = setup_simulation_from_testcase(test_case, config)
+    if current_test_case:
+        sim, config = setup_simulation_from_testcase(current_test_case, config)
         
         # Override with explicit world if specified
         if args.world:
@@ -247,8 +259,11 @@ def main():
         else:
             policy_parts.append(args.policy.title())
         
-        if test_case:
-            policy_parts.append(f"({test_case.id})")
+        if current_test_case:
+            if len(test_cases) > 1:
+                policy_parts.append(f"({current_test_case.id} - {current_test_case_index+1}/{len(test_cases)})")
+            else:
+                policy_parts.append(f"({current_test_case.id})")
         elif args.world:
             policy_parts.append(f"({args.world})")
         
@@ -258,14 +273,30 @@ def main():
         if args.checkpoint or args.policy != 'manual':
             print("Controls:")
             print("  V: Toggle vision display")
+            if len(test_cases) > 1:
+                print("  N: Next test case")
+                print("  P: Previous test case")
+                print("  R: Reset current test case")
             print("  ESC: Exit")
         else:
             print("Controls:")
             print("  Arrow keys: Steer")
             print("  Space: Throttle")
             print("  V: Toggle vision display")
+            if len(test_cases) > 1:
+                print("  N: Next test case")
+                print("  P: Previous test case")
+                print("  R: Reset current test case")
             print("  ESC: Exit")
         print()
+        
+        # Create test case cycling context
+        test_case_context = {
+            'test_cases': test_cases,
+            'current_index': current_test_case_index,
+            'config': config,
+            'world_override': args.world
+        } if len(test_cases) > 1 else None
         
         run_simulation_gui(
             policy=policy,
@@ -273,7 +304,8 @@ def main():
             fps=args.fps,
             policy_name=policy_name,
             sim=sim,
-            dt=args.dt
+            dt=args.dt,
+            test_case_context=test_case_context
         )
         
     except ImportError:

@@ -107,22 +107,55 @@ class RLGRUNetwork(nn.Module):
         # Remove sequence dimension
         gru_output = gru_output.squeeze(1)  # [batch_size, hidden_size]
         
-        # Actor and critic heads
-        action_mean = self.actor_head(gru_output)  # [batch_size, 2]
+        # Actor and critic heads - output raw logits for squashing
+        action_logits = self.actor_head(gru_output)  # [batch_size, 2]
         value = self.critic_head(gru_output).squeeze(-1)  # [batch_size]
-        
-        # Apply action constraints
-        # throttle: [0, 1] via sigmoid
-        # steering: [-1, 1] via tanh
-        action_mean = torch.stack([
-            torch.sigmoid(action_mean[:, 0]),  # throttle
-            torch.tanh(action_mean[:, 1])      # steering
-        ], dim=1)
         
         # Expand log_std to match batch size
         log_std = self.log_std.expand(batch_size, -1)  # [batch_size, 2]
         
-        return action_mean, log_std, value, new_hidden
+        return action_logits, log_std, value, new_hidden
+    
+    def forward_sequence(self, obs_seq: torch.Tensor, h0: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Forward pass over a sequence for BPTT training
+        
+        Args:
+            obs_seq: Observation sequence [T, input_dim] for single batch
+            h0: Initial hidden state [num_layers, 1, hidden_size]
+            
+        Returns:
+            Tuple of (action_logits_seq, log_std_seq, value_seq, final_hidden)
+        """
+        # obs_seq is [T, input_dim], we need [1, T, input_dim] for batch_first=True GRU
+        if obs_seq.dim() == 2:
+            obs_seq = obs_seq.unsqueeze(0)  # [1, T, input_dim]
+        
+        batch_size, T, input_dim = obs_seq.shape
+        
+        # Encode all observations
+        obs_flat = obs_seq.view(batch_size * T, input_dim)
+        encoded_flat = self.encoder(obs_flat)  # [batch_size * T, encoder_output_dim]
+        encoded_seq = encoded_flat.view(batch_size, T, self.encoder_output_dim)
+        
+        # GRU forward pass over sequence
+        # encoded_seq: [1, T, encoder_output_dim]
+        # h0: [num_layers, 1, hidden_size]
+        gru_output_seq, final_hidden = self.gru(encoded_seq, h0)  # [1, T, hidden_size]
+        
+        # Apply actor and critic heads to all timesteps
+        gru_flat = gru_output_seq.view(batch_size * T, self.hidden_size)
+        action_logits_flat = self.actor_head(gru_flat)  # [batch_size * T, 2]
+        value_flat = self.critic_head(gru_flat).squeeze(-1)  # [batch_size * T]
+        
+        # Reshape back to sequences
+        action_logits_seq = action_logits_flat.view(batch_size, T, 2)
+        value_seq = value_flat.view(batch_size, T)
+        
+        # Expand log_std for all timesteps
+        log_std_seq = self.log_std.expand(batch_size, T, -1)
+        
+        return action_logits_seq, log_std_seq, value_seq, final_hidden
     
     def init_hidden(self, batch_size: int, device: torch.device = None) -> torch.Tensor:
         """Initialize hidden state for GRU"""
@@ -134,7 +167,7 @@ class RLGRUNetwork(nn.Module):
     
     def act(self, obs: torch.Tensor, hidden: torch.Tensor, deterministic: bool = False) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
-        Sample action from policy
+        Sample action from policy using squashed Gaussian
         
         Args:
             obs: Observation tensor [batch_size, input_dim]
@@ -144,23 +177,40 @@ class RLGRUNetwork(nn.Module):
         Returns:
             Tuple of (action, log_prob, value, new_hidden)
         """
-        action_mean, log_std, value, new_hidden = self.forward(obs, hidden)
+        action_logits, log_std, value, new_hidden = self.forward(obs, hidden)
         
         if deterministic:
-            action = action_mean
+            # Use mean of pre-squash distribution, then squash
+            u_mean = action_logits
+            u = u_mean
+        else:
+            # Sample from pre-squash Gaussian
+            std = torch.exp(log_std)
+            dist = torch.distributions.Normal(action_logits, std)
+            u = dist.sample()
+        
+        # Squash with tanh
+        action_tanh = torch.tanh(u)
+        
+        # Map to action bounds:
+        # throttle: [-1,1] -> [0,1] via (tanh + 1) / 2
+        # steering: [-1,1] -> [-1,1] (already correct)
+        action = torch.stack([
+            (action_tanh[:, 0] + 1.0) / 2.0,  # throttle: [0, 1]
+            action_tanh[:, 1]                 # steering: [-1, 1]
+        ], dim=1)
+        
+        if deterministic:
             log_prob = torch.zeros(action.shape[0], device=action.device)
         else:
-            # Sample from Gaussian distribution
+            # Compute log_prob with tanh correction
             std = torch.exp(log_std)
-            dist = torch.distributions.Normal(action_mean, std)
-            action = dist.sample()
-            log_prob = dist.log_prob(action).sum(dim=-1)  # Sum over action dimensions
+            dist = torch.distributions.Normal(action_logits, std)
+            log_prob_u = dist.log_prob(u).sum(dim=-1)  # Sum over action dimensions
             
-            # Clamp actions to valid ranges
-            action = torch.stack([
-                torch.clamp(action[:, 0], 0.0, 1.0),  # throttle
-                torch.clamp(action[:, 1], -1.0, 1.0)  # steering
-            ], dim=1)
+            # Tanh correction: log_prob(a) = log_prob(u) - sum(log(1 - tanh(u)^2 + eps))
+            tanh_correction = torch.log(1 - action_tanh.pow(2) + 1e-6).sum(dim=-1)
+            log_prob = log_prob_u - tanh_correction
         
         return action, log_prob, value, new_hidden
 

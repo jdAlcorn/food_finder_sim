@@ -23,48 +23,169 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from src.sim.core import SimulationConfig
 from src.sim.unified import SimulationSingle
 from src.policy.rl_gru_policy import RLGRUPolicy
-from src.policy.checkpoint import save_policy
+from src.policy.checkpoint import save_policy, load_policy
 from src.eval.load_suite import load_suite
 from src.eval.testcases import TestCase
 from src.eval.world_integration import resolve_test_case_world, apply_world_to_simulation
 from src.sim.batched import BatchedSimulation
 
 
-def respawn_food(sim: SimulationSingle, test_case: TestCase, rng: np.random.RandomState, 
-                 world_bounds: Tuple[float, float, float, float] = (50, 750, 50, 750),
-                 min_distance_from_agent: float = 100.0) -> Tuple[float, float]:
-    """
-    Respawn food at a random but valid location
-    
-    Args:
-        sim: Simulation instance
-        test_case: Test case for reference
-        rng: Random number generator for deterministic spawning
-        world_bounds: (min_x, max_x, min_y, max_y) world boundaries
-        min_distance_from_agent: Minimum distance from agent
+def extract_run_folder_from_resume_path(resume_path: str) -> str:
+    """Extract the run folder from a resume checkpoint path"""
+    # Resume path should be like: checkpoints/rl_gru_trained_20241230_143022/rl_gru_trained_best.json
+    # We want to extract: checkpoints/rl_gru_trained_20241230_143022
+    return os.path.dirname(resume_path)
+
+
+def get_run_folder(args) -> str:
+    """Get the run folder - either create new or extract from resume path"""
+    if args.resume:
+        # Resuming - use the same folder as the original run
+        run_folder = extract_run_folder_from_resume_path(args.resume)
+        print(f"Resuming run in folder: {run_folder}")
+        return run_folder
+    else:
+        # New run - create timestamped folder
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        run_dir = os.path.join(args.output_dir, f"{args.save_prefix}_{timestamp}")
+        os.makedirs(run_dir, exist_ok=True)
+        print(f"Created new run folder: {run_dir}")
+        return run_dir
+
+
+def initialize_policy_and_optimizer(args) -> Tuple[RLGRUPolicy, torch.optim.Optimizer, int, float, deque, deque, deque]:
+    """Initialize policy and optimizer, optionally resuming from checkpoint"""
+    if args.resume:
+        print(f"Resuming from checkpoint: {args.resume}")
         
-    Returns:
-        Tuple of (food_x, food_y)
-    """
-    agent_state = sim.get_state()['agent_state']
-    agent_x, agent_y = agent_state['x'], agent_state['y']
-    
-    max_attempts = 100
-    for attempt in range(max_attempts):
-        # Generate random position within world bounds
-        food_x = rng.uniform(world_bounds[0], world_bounds[1])
-        food_y = rng.uniform(world_bounds[2], world_bounds[3])
+        # Load checkpoint
+        policy, config, metadata = load_policy(args.resume)
         
-        # Check distance from agent
-        distance_from_agent = np.sqrt((food_x - agent_x)**2 + (food_y - agent_y)**2)
+        # Verify policy type
+        if not hasattr(policy, 'network') or not hasattr(policy.network, 'gru'):
+            raise ValueError(f"Resume checkpoint must be an RL GRU policy, got {type(policy)}")
         
-        if distance_from_agent >= min_distance_from_agent:
-            # Valid position found
-            return food_x, food_y
+        # Create optimizer with loaded policy parameters
+        optimizer = optim.Adam(policy.network.parameters(), lr=args.lr)
+        
+        # Extract training state from metadata
+        start_episode = metadata.get('episode', 0)
+        best_reward = metadata.get('best_reward', float('-inf'))
+        
+        # Initialize tracking deques with some history if available
+        episode_rewards = deque(maxlen=100)
+        episode_lengths = deque(maxlen=100)
+        food_collected_counts = deque(maxlen=100)
+        
+        # If we have recent episode history in metadata, restore it
+        if 'recent_rewards' in metadata:
+            episode_rewards.extend(metadata['recent_rewards'])
+        if 'recent_lengths' in metadata:
+            episode_lengths.extend(metadata['recent_lengths'])
+        if 'recent_food_collected' in metadata:
+            food_collected_counts.extend(metadata['recent_food_collected'])
+        
+        print(f"Resumed from episode {start_episode}, best reward: {best_reward:.2f}")
+        print(f"Policy device: {policy.device}")
+        
+        return policy, optimizer, start_episode, best_reward, episode_rewards, episode_lengths, food_collected_counts
     
-    # Fallback: use original test case position if no valid position found
-    print(f"Warning: Could not find valid food spawn position after {max_attempts} attempts, using original position")
-    return test_case.food.x, test_case.food.y
+    else:
+        # Create new policy
+        policy = RLGRUPolicy(
+            encoder_dims=tuple(args.encoder_dims),
+            hidden_size=args.hidden_size,
+            num_layers=args.num_layers,
+            device=args.device,
+            v_scale=args.v_scale,
+            omega_scale=args.omega_scale,
+            init_seed=args.seed
+        )
+        
+        # Create optimizer
+        optimizer = optim.Adam(policy.network.parameters(), lr=args.lr)
+        
+        # Initialize training tracking
+        episode_rewards = deque(maxlen=100)
+        episode_lengths = deque(maxlen=100)
+        food_collected_counts = deque(maxlen=100)
+        
+        start_episode = 0
+        best_reward = float('-inf')
+        
+        print(f"Initialized new policy with {sum(p.numel() for p in policy.network.parameters())} parameters")
+        
+        return policy, optimizer, start_episode, best_reward, episode_rewards, episode_lengths, food_collected_counts
+
+
+def save_checkpoint_with_training_state(run_dir: str, args, episode: int, policy: RLGRUPolicy, 
+                                       best_reward: float, episode_rewards: deque, episode_lengths: deque, 
+                                       food_collected_counts: deque, config, training_time: float, 
+                                       is_best: bool = False, is_final: bool = False) -> str:
+    """Save checkpoint with training state for resumption"""
+    # Determine checkpoint filename
+    if is_best:
+        checkpoint_path = os.path.join(run_dir, f"{args.save_prefix}_best.json")
+    elif is_final:
+        checkpoint_path = os.path.join(run_dir, f"{args.save_prefix}_final.json")
+    else:
+        checkpoint_path = os.path.join(run_dir, f"{args.save_prefix}_ep_{episode:06d}.json")
+    
+    # Create metadata with training state
+    metadata = {
+        'episode': episode,
+        'best_reward': best_reward,
+        'training_time': training_time,
+        'training_method': 'RL with GRU',
+        'policy_type': 'RLGRU',
+        
+        # Model hyperparameters
+        'encoder_dims': args.encoder_dims,
+        'hidden_size': args.hidden_size,
+        'num_layers': args.num_layers,
+        'v_scale': args.v_scale,
+        'omega_scale': args.omega_scale,
+        
+        # Training hyperparameters
+        'lr': args.lr,
+        'gamma': args.gamma,
+        'lam': args.lam,
+        'clip_grad_norm': args.clip_grad_norm,
+        'value_loss_coef': args.value_loss_coef,
+        'reward_scale': args.reward_scale,
+        'time_bonus_coef': args.time_bonus_coef,
+        'step_penalty': args.step_penalty,
+        'max_steps': args.max_steps,
+        
+        # Recent training history for resumption
+        'recent_rewards': list(episode_rewards)[-20:] if episode_rewards else [],
+        'recent_lengths': list(episode_lengths)[-20:] if episode_lengths else [],
+        'recent_food_collected': list(food_collected_counts)[-20:] if food_collected_counts else [],
+        
+        # Statistics
+        'total_episodes': episode,
+        'avg_reward_last_100': np.mean(episode_rewards) if episode_rewards else 0.0,
+        'success_rate_last_100': sum(1 for x in food_collected_counts if x > 0) / len(food_collected_counts) if food_collected_counts else 0.0,
+        
+        # Run info
+        'run_folder': os.path.basename(run_dir),
+        'device': args.device,
+        'seed': args.seed
+    }
+    
+    # Add current episode info if not final
+    if not is_final and episode_rewards:
+        metadata['current_reward'] = episode_rewards[-1]
+        metadata['current_length'] = episode_lengths[-1] if episode_lengths else 0
+        metadata['current_food_collected'] = food_collected_counts[-1] if food_collected_counts else 0
+    
+    # Save checkpoint
+    save_policy(checkpoint_path, 'RLGRU', policy.get_params(), config, metadata, policy)
+    
+    return checkpoint_path
+
+
+# Note: respawn_food function removed as episodes now terminate on food collection
 
 
 def compute_gae(rewards: List[float], values: List[float], next_value: float, 
@@ -105,31 +226,57 @@ def compute_gae(rewards: List[float], values: List[float], next_value: float,
     return advantages, returns
 
 
-def compute_reward(sim_state: Dict[str, Any], prev_sim_state: Optional[Dict[str, Any]], 
-                   food_collected_this_step: bool, steps_since_food_seen: int) -> Tuple[float, int]:
+def compute_reward(step_info: Dict[str, Any], prev_step_info: Optional[Dict[str, Any]], 
+                   food_collected_this_step: bool, steps_since_food_seen: int, 
+                   step_idx: int, max_steps: int = 600, reward_scale: float = 1.0,
+                   time_bonus_coef: float = 0.0, step_penalty: float = 0.001,
+                   last_seen_food_distance: Optional[float] = None) -> Tuple[float, int, Dict[str, float], Optional[float]]:
     """
-    Compute reward with sensor-based shaping
+    Compute reward with sensor-based shaping (consistent schema) and detailed component tracking
+    
+    REWARD DESIGN CHANGES (to eliminate local optima and farming):
+    - REMOVED per-step "food visible" bonus to prevent stationary farming behavior
+    - ADDED reacquire-only bonus when food becomes visible after being invisible
+    - ADDED smoothed progress tracking with grace period for brief vision flicker
+    - ADDED small negative progress penalty to discourage backing away from food
     
     Args:
-        sim_state: Current simulation state
-        prev_sim_state: Previous simulation state (None for first step)
+        step_info: Current step info from sim.step()
+        prev_step_info: Previous step info (None for first step)
         food_collected_this_step: Whether food was collected this step
         steps_since_food_seen: Steps since food was last visible
+        step_idx: Current step index in episode
+        max_steps: Maximum steps in episode
+        reward_scale: Scale factor for all rewards
+        time_bonus_coef: Coefficient for time-to-success bonus
+        step_penalty: Per-step penalty
+        last_seen_food_distance: Trainer-side memory of last observed food distance
         
     Returns:
-        Tuple of (reward, updated_steps_since_food_seen)
+        Tuple of (reward, updated_steps_since_food_seen, reward_components_dict, updated_last_seen_food_distance)
     """
     reward = 0.0
+    reward_components = {
+        'terminal': 0.0,
+        'reacquire_bonus': 0.0,  # Renamed from visible_bonus
+        'progress': 0.0,
+        'step_penalty': 0.0,
+        'time_bonus': 0.0
+    }
     
     # 1. Terminal reward (dominant)
     if food_collected_this_step:
-        reward += 1000.0  # Large positive reward for reaching food
+        terminal_reward = 1000.0 * reward_scale
+        time_bonus = time_bonus_coef * (max_steps - step_idx) * reward_scale
+        reward += terminal_reward + time_bonus
+        reward_components['terminal'] = terminal_reward
+        reward_components['time_bonus'] = time_bonus
         steps_since_food_seen = 0
-        return reward, steps_since_food_seen
+        return reward, steps_since_food_seen, reward_components, None
     
     # 2. Food visibility and proximity shaping (sensor-derived only)
-    vision_hit_types = sim_state['vision_hit_types']
-    vision_distances = sim_state['vision_distances']
+    vision_hit_types = step_info['vision_hit_types']
+    vision_distances = step_info['vision_distances']
     
     # Check if food is visible in any ray
     food_visible = False
@@ -142,47 +289,61 @@ def compute_reward(sim_state: Dict[str, Any], prev_sim_state: Optional[Dict[str,
             if distance is not None and distance < min_food_distance:
                 min_food_distance = distance
     
+    # Check if food was visible in previous step
+    prev_food_visible = False
+    if prev_step_info is not None:
+        prev_vision_hit_types = prev_step_info['vision_hit_types']
+        for hit_type in prev_vision_hit_types:
+            if hit_type == 'food':
+                prev_food_visible = True
+                break
+    
     if food_visible:
         steps_since_food_seen = 0
         
-        # Small bonus for seeing food
-        reward += 1.0
+        # REACQUIRE-ONLY bonus: Only when food becomes visible after not being visible
+        # Eliminates per-step farming of visibility bonus
+        if not prev_food_visible:
+            reacquire_bonus = 2.0 * reward_scale  # Slightly higher than old per-step bonus
+            reward += reacquire_bonus
+            reward_components['reacquire_bonus'] = reacquire_bonus
         
-        # Progress reward when getting closer to visible food
-        if prev_sim_state is not None:
-            prev_vision_hit_types = prev_sim_state['vision_hit_types']
-            prev_vision_distances = prev_sim_state['vision_distances']
+        # Update last seen distance for progress tracking
+        last_seen_food_distance = min_food_distance
+        
+        # Progress reward using smoothed distance tracking
+        if last_seen_food_distance is not None and last_seen_food_distance < float('inf'):
+            progress = last_seen_food_distance - min_food_distance
+            # Allow small negative progress (backing away penalty) but cap positive progress
+            progress_reward = np.clip(progress, -2.0, 20.0) * reward_scale  # Symmetric range with penalty
+            reward += progress_reward
+            reward_components['progress'] = progress_reward
             
-            # Find minimum food distance in previous state
-            prev_min_food_distance = float('inf')
-            for i, hit_type in enumerate(prev_vision_hit_types):
-                if hit_type == 'food':
-                    distance = prev_vision_distances[i]
-                    if distance is not None and distance < prev_min_food_distance:
-                        prev_min_food_distance = distance
-            
-            # Progress reward (capped to prevent farming)
-            if prev_min_food_distance < float('inf') and min_food_distance < float('inf'):
-                progress = prev_min_food_distance - min_food_distance
-                progress_reward = np.clip(progress, 0, 50.0)  # Cap at 50.0 instead of 10.0
-                reward += progress_reward
     else:
         steps_since_food_seen += 1
+        
+        # Grace period: retain last_seen_food_distance for brief vision flicker
+        # After 5 steps without seeing food, clear the distance memory
+        if steps_since_food_seen > 5:
+            last_seen_food_distance = None
     
-    # 3. Small time penalty to encourage efficiency
-    reward -= 0.001
+    # 3. Time penalty to encourage efficiency
+    step_penalty_val = -step_penalty * reward_scale
+    reward += step_penalty_val
+    reward_components['step_penalty'] = step_penalty_val
     
-    return reward, steps_since_food_seen
+    return reward, steps_since_food_seen, reward_components, last_seen_food_distance
 
 
 def run_episode(policy: RLGRUPolicy, sim: SimulationSingle, test_case: TestCase, max_steps: int, 
-                dt: float, episode_rng: np.random.RandomState) -> Tuple[List[torch.Tensor], List[torch.Tensor], List[float], 
-                                   List[torch.Tensor], List[bool], Dict[str, Any]]:
+                dt: float, episode_rng: np.random.RandomState, reward_scale: float = 1.0,
+                time_bonus_coef: float = 0.0, step_penalty: float = 0.001) -> Tuple[List[torch.Tensor], List[torch.Tensor], List[float], 
+                                   List[torch.Tensor], List[torch.Tensor], List[bool], Dict[str, Any]]:
     """
     Run a single episode and collect rollout data
     
     Returns:
-        Tuple of (observations, actions, rewards, log_probs, dones, episode_info)
+        Tuple of (observations, actions, rewards, log_probs, values, dones, episode_info)
     """
     observations = []
     actions = []
@@ -190,12 +351,27 @@ def run_episode(policy: RLGRUPolicy, sim: SimulationSingle, test_case: TestCase,
     log_probs = []
     values = []
     dones = []
+    hidden_states = []  # Store hidden states for potential future use (e.g., debugging, analysis)
     
     # Episode tracking
     total_reward = 0.0
     food_collected = 0
     steps_since_food_seen = 0
     food_seen_this_episode = False
+    
+    # Detailed diagnostics
+    success_step = None
+    total_terminal_reward = 0.0
+    total_reacquire_bonus = 0.0  # reacquire_bonus from function
+    total_progress_reward = 0.0
+    total_step_penalty = 0.0
+    min_food_distance_seen = float('inf')
+    final_food_distance = float('inf')
+    food_visible_steps = 0
+    total_steps = 0
+    
+    # Trainer-side memory for smoothed progress tracking (NOT part of agent observation)
+    last_seen_food_distance = None
     
     # Reset simulation and policy
     sim.reset()
@@ -223,11 +399,16 @@ def run_episode(policy: RLGRUPolicy, sim: SimulationSingle, test_case: TestCase,
     sim_state = sim.get_state()
     prev_sim_state = None
     
+    # Move observation building outside the loop
+    from src.policy.obs import build_observation
+    
     for step in range(max_steps):
         # Build observation
-        from src.policy.obs import build_observation
         obs = build_observation(sim_state, policy.v_scale, policy.omega_scale)
         obs_tensor = torch.tensor(obs, dtype=torch.float32, device=policy.device).unsqueeze(0)
+        
+        # Store hidden state before action
+        hidden_states.append(policy._hidden_state.clone())
         
         # Get action from policy
         with torch.no_grad():
@@ -238,27 +419,50 @@ def run_episode(policy: RLGRUPolicy, sim: SimulationSingle, test_case: TestCase,
         # Update hidden state
         policy._hidden_state = new_hidden.detach()
         
-        # Convert action to simulation format
+        # Convert action to simulation format - NO CLIPPING since action is already bounded
         action_np = action.cpu().numpy()[0]
         sim_action = {
-            'throttle': float(np.clip(action_np[0], 0.0, 1.0)),
-            'steer': float(np.clip(action_np[1], -1.0, 1.0))
+            'throttle': float(action_np[0]),  # Already in [0,1]
+            'steer': float(action_np[1])      # Already in [-1,1]
         }
         
         # Step simulation
         step_info = sim.step(dt, sim_action)
         food_collected_this_step = step_info['food_collected_this_step']
         
-        # Compute reward
-        reward, steps_since_food_seen = compute_reward(
-            step_info, prev_sim_state, food_collected_this_step, steps_since_food_seen
+        # Compute reward with detailed tracking
+        reward, steps_since_food_seen, reward_components, last_seen_food_distance = compute_reward(
+            step_info, prev_sim_state, food_collected_this_step, steps_since_food_seen, step,
+            max_steps, reward_scale, time_bonus_coef, step_penalty, last_seen_food_distance
         )
         
-        # Debug: Check if food is visible
+        # Track reward components
+        total_terminal_reward += reward_components['terminal']
+        total_reacquire_bonus += reward_components['reacquire_bonus']
+        total_progress_reward += reward_components['progress']
+        total_step_penalty += reward_components['step_penalty']
+        
+        # Track food distance diagnostics
         vision_hit_types = step_info['vision_hit_types']
-        food_visible_this_step = 'food' in vision_hit_types if vision_hit_types else False
+        vision_distances = step_info['vision_distances']
+        food_visible_this_step = False
+        current_min_food_distance = float('inf')
+        
+        for i, hit_type in enumerate(vision_hit_types):
+            if hit_type == 'food':
+                food_visible_this_step = True
+                distance = vision_distances[i]
+                if distance is not None and distance < current_min_food_distance:
+                    current_min_food_distance = distance
+        
         if food_visible_this_step:
             food_seen_this_episode = True
+            food_visible_steps += 1
+            if current_min_food_distance < min_food_distance_seen:
+                min_food_distance_seen = current_min_food_distance
+            final_food_distance = current_min_food_distance  # Update final distance when visible
+        
+        total_steps += 1
         
         # Store rollout data
         observations.append(obs_tensor.squeeze(0))
@@ -270,33 +474,15 @@ def run_episode(policy: RLGRUPolicy, sim: SimulationSingle, test_case: TestCase,
         # Update tracking
         total_reward += reward
         
-        # Check for food collection and respawn if needed
+        # Check for episode termination
+        done = False
         if food_collected_this_step:
             food_collected += 1
-            
-            # Respawn food at new location for continuous learning
-            new_food_x, new_food_y = respawn_food(sim, test_case, episode_rng)
-            
-            # Get current agent state to preserve it
-            current_agent_state = step_info['agent_state']
-            agent_states = [{
-                'x': current_agent_state['x'],
-                'y': current_agent_state['y'],
-                'theta': current_agent_state['theta'],
-                'vx': current_agent_state['vx'],
-                'vy': current_agent_state['vy'],
-                'omega': current_agent_state['omega'],
-                'throttle': current_agent_state['throttle']
-            }]
-            
-            food_states = [{'x': new_food_x, 'y': new_food_y}]
-            sim.batched_sim.reset_to_states(agent_states, food_states)
-            
-            # Reset steps since food seen for new food
-            steps_since_food_seen = 0
+            success_step = step
+            done = True  # Episode ends on food collection
+        elif step >= max_steps - 1:
+            done = True  # Time limit reached
         
-        # Check for episode termination (only on max steps, not food collection)
-        done = step >= max_steps - 1
         dones.append(done)
         
         if done:
@@ -311,7 +497,18 @@ def run_episode(policy: RLGRUPolicy, sim: SimulationSingle, test_case: TestCase,
         'food_collected': food_collected,
         'episode_length': len(rewards),
         'final_steps_since_food_seen': steps_since_food_seen,
-        'food_seen_this_episode': food_seen_this_episode
+        'food_seen_this_episode': food_seen_this_episode,
+        'hidden_states': hidden_states,
+        # Detailed diagnostics
+        'success': food_collected > 0,
+        'success_step': success_step,
+        'total_terminal_reward': total_terminal_reward,
+        'total_reacquire_bonus': total_reacquire_bonus,  # reacquire_bonus
+        'total_progress_reward': total_progress_reward,
+        'total_step_penalty': total_step_penalty,
+        'min_food_distance_seen': min_food_distance_seen if min_food_distance_seen < float('inf') else None,
+        'final_food_distance': final_food_distance if final_food_distance < float('inf') else None,
+        'food_visible_fraction': food_visible_steps / total_steps if total_steps > 0 else 0.0
     }
     
     return observations, actions, rewards, log_probs, values, dones, episode_info
@@ -321,70 +518,148 @@ def update_policy(policy: RLGRUPolicy, optimizer: torch.optim.Optimizer,
                   observations: List[torch.Tensor], actions: List[torch.Tensor],
                   rewards: List[float], log_probs: List[torch.Tensor], 
                   values: List[torch.Tensor], dones: List[bool],
+                  hidden_states: List[torch.Tensor],
                   gamma: float = 0.99, lam: float = 0.95, 
-                  clip_grad_norm: float = 0.5) -> Dict[str, float]:
+                  clip_grad_norm: float = 0.5, value_loss_coef: float = 0.5,
+                  episode_num: int = 0) -> Dict[str, float]:
     """
-    Update policy using collected rollout data
+    Update policy using collected rollout data with proper GRU sequence training
     
     Returns:
         Dict with training metrics
     """
     # Convert to tensors
-    obs_batch = torch.stack(observations)
-    action_batch = torch.stack(actions)
-    old_log_prob_batch = torch.stack(log_probs)
-    value_batch = torch.stack(values)
+    obs_seq = torch.stack(observations)  # [T, obs_dim]
+    action_seq = torch.stack(actions)    # [T, action_dim]
+    old_log_prob_seq = torch.stack(log_probs)  # [T]
+    value_seq = torch.stack(values)      # [T]
+    
+    T = obs_seq.shape[0]
+    
+    # Debug: Print tensor shapes every 50 episodes
+    if episode_num % 50 == 0:
+        print(f"  [DEBUG] Tensor shapes:")
+        print(f"    obs_seq: {obs_seq.shape}")
+        print(f"    action_seq: {action_seq.shape}")
+        print(f"    old_log_prob_seq: {old_log_prob_seq.shape}")
+        print(f"    value_seq: {value_seq.shape}")
     
     # Compute next value for bootstrapping (if episode didn't terminate)
     if not dones[-1]:
         with torch.no_grad():
-            next_obs = obs_batch[-1].unsqueeze(0)
+            next_obs = obs_seq[-1].unsqueeze(0)
             next_value = policy.get_value(next_obs, policy._hidden_state).item()
     else:
         next_value = 0.0
     
     # Compute advantages and returns using GAE
     advantages, returns = compute_gae(
-        rewards, [v.item() for v in value_batch], next_value, dones, gamma, lam
+        rewards, [v.item() for v in value_seq], next_value, dones, gamma, lam
     )
     
-    advantage_batch = torch.tensor(advantages, dtype=torch.float32, device=policy.device)
-    return_batch = torch.tensor(returns, dtype=torch.float32, device=policy.device)
+    advantage_seq = torch.tensor(advantages, dtype=torch.float32, device=policy.device)
+    return_seq = torch.tensor(returns, dtype=torch.float32, device=policy.device)
     
     # Normalize advantages
-    advantage_batch = (advantage_batch - advantage_batch.mean()) / (advantage_batch.std() + 1e-8)
+    advantage_seq = (advantage_seq - advantage_seq.mean()) / (advantage_seq.std() + 1e-8)
     
-    # Reset hidden state for forward pass
-    batch_size = obs_batch.shape[0]
-    hidden = policy.network.init_hidden(batch_size, policy.device)
+    # Initialize hidden state for sequence forward pass
+    h0 = policy.network.init_hidden(1, policy.device)
     
-    # Forward pass through network
-    action_mean, log_std, new_values, _ = policy.network.forward(obs_batch, hidden)
+    # Forward pass through network over the entire sequence
+    # forward_sequence expects [T, obs_dim] and returns [1, T, *] (batch-first)
+    action_logits_seq, log_std_seq, new_value_seq, _ = policy.network.forward_sequence(obs_seq, h0)
     
-    # Compute new log probabilities
-    std = torch.exp(log_std)
-    dist = torch.distributions.Normal(action_mean, std)
-    new_log_probs = dist.log_prob(action_batch).sum(dim=-1)
+    # Debug: Print forward_sequence output shapes
+    if episode_num % 50 == 0:
+        print(f"    action_logits_seq (raw): {action_logits_seq.shape}")
+        print(f"    log_std_seq (raw): {log_std_seq.shape}")
+        print(f"    new_value_seq (raw): {new_value_seq.shape}")
+    
+    # Squeeze batch dimension since we have batch_size=1
+    # forward_sequence returns [1, T, *], we want [T, *]
+    action_logits_seq = action_logits_seq.squeeze(0)  # [T, 2]
+    log_std_seq = log_std_seq.squeeze(0)              # [T, 2]
+    new_value_seq = new_value_seq.squeeze(0)          # [T]
+    
+    if episode_num % 50 == 0:
+        print(f"    action_logits_seq (squeezed): {action_logits_seq.shape}")
+        print(f"    log_std_seq (squeezed): {log_std_seq.shape}")
+        print(f"    new_value_seq (squeezed): {new_value_seq.shape}")
+    
+    # Compute new log probabilities using squashed Gaussian (vectorized)
+    std_seq = torch.exp(log_std_seq)  # [T, 2]
+    
+    # Reverse the squashing to get u from executed actions
+    # Policy mapping: throttle = (tanh + 1) / 2, steering = tanh
+    # Inverse: tanh_throttle = 2*throttle - 1, tanh_steering = steering
+    action_tanh = torch.stack([
+        2.0 * action_seq[:, 0] - 1.0,  # throttle: [0,1] -> [-1,1]
+        action_seq[:, 1]               # steering: [-1,1] -> [-1,1]
+    ], dim=1)  # [T, 2]
+    
+    # Inverse tanh (atanh) to get u, with clamping for numerical stability
+    action_tanh_clamped = torch.clamp(action_tanh, -0.999, 0.999)
+    u_seq = torch.atanh(action_tanh_clamped)  # [T, 2]
+    
+    # Compute log prob of u under Gaussian
+    dist_seq = torch.distributions.Normal(action_logits_seq, std_seq)
+    log_prob_u_seq = dist_seq.log_prob(u_seq).sum(dim=-1)  # [T]
+    
+    # Apply tanh correction
+    tanh_correction = torch.log(1 - action_tanh_clamped.pow(2) + 1e-6).sum(dim=-1)  # [T]
+    new_log_prob_seq = log_prob_u_seq - tanh_correction
+    
+    # Sanity check: Compare old vs new log probs for first few timesteps
+    if episode_num % 50 == 0:
+        n_check = min(5, T)
+        log_prob_diff = torch.abs(old_log_prob_seq[:n_check] - new_log_prob_seq[:n_check])
+        print(f"  [SANITY] Log-prob differences (first {n_check} steps):")
+        print(f"    Mean: {log_prob_diff.mean().item():.6f}")
+        print(f"    Max: {log_prob_diff.max().item():.6f}")
+        print(f"    Old log_probs: {old_log_prob_seq[:n_check].tolist()}")
+        print(f"    New log_probs: {new_log_prob_seq[:n_check].tolist()}")
     
     # Policy loss (simplified A2C, no PPO clipping for now)
-    policy_loss = -(new_log_probs * advantage_batch).mean()
+    policy_loss = -(new_log_prob_seq * advantage_seq).mean()
     
     # Value loss
-    value_loss = F.mse_loss(new_values, return_batch)
+    value_loss = F.mse_loss(new_value_seq, return_seq)
     
-    # Entropy bonus for exploration
-    entropy = dist.entropy().sum(dim=-1).mean()
+    # Entropy bonus for exploration (vectorized)
+    entropy = dist_seq.entropy().sum(dim=-1).mean()  # [T] -> scalar
     entropy_loss = -0.01 * entropy  # Small entropy coefficient
     
     # Total loss
-    total_loss = policy_loss + 0.5 * value_loss + entropy_loss
+    total_loss = policy_loss + value_loss_coef * value_loss + entropy_loss
     
     # Backward pass
     optimizer.zero_grad()
     total_loss.backward()
     
+    # Compute gradient norm before clipping
+    grad_norm_pre_clip = 0.0
+    gru_grad_norm = 0.0
+    for name, param in policy.network.named_parameters():
+        if param.grad is not None:
+            param_grad_norm = param.grad.data.norm(2).item()
+            grad_norm_pre_clip += param_grad_norm ** 2
+            
+            # Track GRU-specific gradients
+            if 'gru' in name:
+                gru_grad_norm += param_grad_norm ** 2
+    
+    grad_norm_pre_clip = grad_norm_pre_clip ** 0.5
+    gru_grad_norm = gru_grad_norm ** 0.5
+    
+    # Debug: Print GRU gradient norms every 50 episodes
+    if episode_num % 50 == 0:
+        print(f"  [GRU CHECK] GRU gradient norm: {gru_grad_norm:.6f}")
+        if gru_grad_norm < 1e-8:
+            print(f"  [WARNING] GRU gradients are very small - may not be training!")
+    
     # Gradient clipping
-    torch.nn.utils.clip_grad_norm_(policy.network.parameters(), clip_grad_norm)
+    grad_norm_post_clip = torch.nn.utils.clip_grad_norm_(policy.network.parameters(), clip_grad_norm)
     
     optimizer.step()
     
@@ -393,8 +668,12 @@ def update_policy(policy: RLGRUPolicy, optimizer: torch.optim.Optimizer,
         'value_loss': value_loss.item(),
         'entropy': entropy.item(),
         'total_loss': total_loss.item(),
-        'mean_advantage': advantage_batch.mean().item(),
-        'mean_return': return_batch.mean().item()
+        'mean_advantage': advantage_seq.mean().item(),
+        'mean_return': return_seq.mean().item(),
+        'grad_norm_pre_clip': grad_norm_pre_clip,
+        'grad_norm_post_clip': grad_norm_post_clip.item(),
+        'grad_clipped': grad_norm_pre_clip > clip_grad_norm,
+        'gru_grad_norm': gru_grad_norm
     }
 
 
@@ -415,6 +694,14 @@ def main():
                        help='GAE lambda parameter (default: 0.95)')
     parser.add_argument('--clip-grad-norm', type=float, default=0.5,
                        help='Gradient clipping norm (default: 0.5)')
+    parser.add_argument('--value-loss-coef', type=float, default=0.5,
+                       help='Value loss coefficient (default: 0.5)')
+    parser.add_argument('--reward-scale', type=float, default=1.0,
+                       help='Scale all rewards by this factor (default: 1.0)')
+    parser.add_argument('--time-bonus-coef', type=float, default=0.0,
+                       help='Time-to-success bonus coefficient (default: 0.0)')
+    parser.add_argument('--step-penalty', type=float, default=0.001,
+                       help='Per-step penalty (default: 0.001)')
     
     # Model parameters
     parser.add_argument('--encoder-dims', type=int, nargs='+', default=[256, 128],
@@ -451,6 +738,8 @@ def main():
                        help='Save checkpoint every N episodes (default: 100)')
     parser.add_argument('--log-interval', type=int, default=10,
                        help='Log progress every N episodes (default: 10)')
+    parser.add_argument('--resume', type=str, default=None,
+                       help='Resume from checkpoint file')
     
     # Viewer integration
     parser.add_argument('--viewer', action='store_true',
@@ -470,6 +759,8 @@ def main():
     print(f"Device: {args.device}")
     print(f"Encoder dims: {args.encoder_dims}")
     print(f"GRU hidden size: {args.hidden_size}")
+    if args.resume:
+        print(f"Resuming from: {args.resume}")
     print()
     
     # Load test suite
@@ -535,30 +826,11 @@ def main():
         print(f"Error setting up simulation: {e}")
         return
     
-    # Create policy
-    policy = RLGRUPolicy(
-        encoder_dims=tuple(args.encoder_dims),
-        hidden_size=args.hidden_size,
-        num_layers=args.num_layers,
-        device=args.device,
-        v_scale=args.v_scale,
-        omega_scale=args.omega_scale,
-        init_seed=args.seed
-    )
+    # Get or create run folder
+    run_dir = get_run_folder(args)
     
-    # Create optimizer
-    optimizer = optim.Adam(policy.network.parameters(), lr=args.lr)
-    
-    # Training tracking
-    episode_rewards = deque(maxlen=100)
-    episode_lengths = deque(maxlen=100)
-    food_collected_counts = deque(maxlen=100)
-    best_reward = float('-inf')
-    
-    # Create output directory
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_dir = os.path.join(args.output_dir, f"{args.save_prefix}_{timestamp}")
-    os.makedirs(run_dir, exist_ok=True)
+    # Initialize policy and optimizer (with optional resume)
+    policy, optimizer, start_episode, best_reward, episode_rewards, episode_lengths, food_collected_counts = initialize_policy_and_optimizer(args)
     
     print(f"Saving to: {run_dir}")
     print()
@@ -569,16 +841,18 @@ def main():
     # Create episode-specific RNG for deterministic food respawning
     episode_rng = np.random.RandomState(args.seed + 1000)
     
-    for episode in range(args.episodes):
+    for episode in range(start_episode, start_episode + args.episodes):
         # Run episode
         observations, actions, rewards, log_probs, values, dones, episode_info = run_episode(
-            policy, sim, test_case, args.max_steps, args.dt, episode_rng
+            policy, sim, test_case, args.max_steps, args.dt, episode_rng,
+            args.reward_scale, args.time_bonus_coef, args.step_penalty
         )
         
         # Update policy
         train_metrics = update_policy(
             policy, optimizer, observations, actions, rewards, log_probs, values, dones,
-            args.gamma, args.lam, args.clip_grad_norm
+            episode_info['hidden_states'], args.gamma, args.lam, args.clip_grad_norm, args.value_loss_coef,
+            episode
         )
         
         # Track metrics
@@ -595,55 +869,63 @@ def main():
             best_reward = episode_reward
             
             # Save best checkpoint
-            best_path = os.path.join(run_dir, f"{args.save_prefix}_best.json")
-            metadata = {
-                'episode': episode,
-                'best_reward': best_reward,
-                'episode_length': episode_length,
-                'food_collected': food_collected,
-                'training_time': time.time() - start_time
-            }
-            save_policy(best_path, 'RLGRU', policy.get_params(), config, metadata, policy)
+            best_checkpoint_path = save_checkpoint_with_training_state(
+                run_dir, args, episode, policy, best_reward, episode_rewards, episode_lengths, 
+                food_collected_counts, config, time.time() - start_time, is_best=True
+            )
         
-        # Logging
+        # Logging with detailed diagnostics
         if episode % args.log_interval == 0:
             avg_reward = np.mean(episode_rewards) if episode_rewards else 0
             avg_length = np.mean(episode_lengths) if episode_lengths else 0
             avg_food = np.mean(food_collected_counts) if food_collected_counts else 0
+            
+            # Success rate over last 100 episodes
+            recent_episodes = min(100, len(food_collected_counts))
+            recent_successes = sum(1 for x in list(food_collected_counts)[-recent_episodes:] if x > 0)
+            success_rate = recent_successes / recent_episodes if recent_episodes > 0 else 0.0
             
             print(f"Episode {episode:5d} | "
                   f"Reward: {episode_reward:7.2f} | "
                   f"Avg: {avg_reward:7.2f} | "
                   f"Best: {best_reward:7.2f} | "
                   f"Length: {episode_length:3d} | "
-                  f"Food: {food_collected} | "
-                  f"Seen: {'Y' if episode_info['food_seen_this_episode'] else 'N'} | "
-                  f"Policy Loss: {train_metrics['policy_loss']:.4f} | "
-                  f"Value Loss: {train_metrics['value_loss']:.4f}")
+                  f"Success: {'Y' if episode_info['success'] else 'N'} | "
+                  f"Step: {episode_info['success_step'] if episode_info['success_step'] is not None else 'N/A'} | "
+                  f"SR: {success_rate:.2f}")
+            
+            # Detailed diagnostics every 50 episodes
+            if episode % (args.log_interval * 5) == 0:
+                print(f"  Rewards: T={episode_info['total_terminal_reward']:.1f}, "
+                      f"R={episode_info['total_reacquire_bonus']:.1f}, "  # R for Reacquire
+                      f"P={episode_info['total_progress_reward']:.1f}, "
+                      f"S={episode_info['total_step_penalty']:.3f}")
+                min_dist_str = f"{episode_info['min_food_distance_seen']:.1f}" if episode_info['min_food_distance_seen'] is not None else "N/A"
+                final_dist_str = f"{episode_info['final_food_distance']:.1f}" if episode_info['final_food_distance'] is not None else "N/A"
+                
+                print(f"  Food: MinDist={min_dist_str}, "
+                      f"FinalDist={final_dist_str}, "
+                      f"VisFrac={episode_info['food_visible_fraction']:.2f}")
+                print(f"  Training: PL={train_metrics['policy_loss']:.4f}, "
+                      f"VL={train_metrics['value_loss']:.4f}, "
+                      f"GradPre={train_metrics['grad_norm_pre_clip']:.4f}, "
+                      f"GradPost={train_metrics['grad_norm_post_clip']:.4f}, "
+                      f"GRU_Grad={train_metrics['gru_grad_norm']:.4f}, "
+                      f"Clipped={'Y' if train_metrics['grad_clipped'] else 'N'}")
+                print()
         
         # Save periodic checkpoints
-        if episode % args.save_interval == 0 and episode > 0:
-            checkpoint_path = os.path.join(run_dir, f"{args.save_prefix}_ep_{episode:06d}.json")
-            metadata = {
-                'episode': episode,
-                'reward': episode_reward,
-                'best_reward': best_reward,
-                'episode_length': episode_length,
-                'food_collected': food_collected,
-                'training_time': time.time() - start_time
-            }
-            save_policy(checkpoint_path, 'RLGRU', policy.get_params(), config, metadata, policy)
+        if episode % args.save_interval == 0 and episode > start_episode:
+            checkpoint_path = save_checkpoint_with_training_state(
+                run_dir, args, episode, policy, best_reward, episode_rewards, episode_lengths, 
+                food_collected_counts, config, time.time() - start_time
+            )
     
     # Save final checkpoint
-    final_path = os.path.join(run_dir, f"{args.save_prefix}_final.json")
-    metadata = {
-        'episode': args.episodes,
-        'final_reward': episode_reward,
-        'best_reward': best_reward,
-        'training_time': time.time() - start_time,
-        'total_episodes': args.episodes
-    }
-    save_policy(final_path, 'RLGRU', policy.get_params(), config, metadata, policy)
+    final_checkpoint_path = save_checkpoint_with_training_state(
+        run_dir, args, start_episode + args.episodes, policy, best_reward, episode_rewards, episode_lengths, 
+        food_collected_counts, config, time.time() - start_time, is_final=True
+    )
     
     print()
     print("Training completed!")

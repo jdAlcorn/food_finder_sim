@@ -48,7 +48,7 @@ def draw_vision(screen, sim, show_vision):
     
     draw_vision_from_simulation(screen, sim)
 
-def draw_ui(screen, font, sim, fps, show_vision, policy_name="Unknown"):
+def draw_ui(screen, font, sim, fps, show_vision, policy_name="Unknown", test_case_info=None):
     """Draw UI information"""
     sim_state = sim.get_state()
     agent_state = sim_state['agent_state']
@@ -69,6 +69,13 @@ def draw_ui(screen, font, sim, fps, show_vision, policy_name="Unknown"):
         f"Policy: {policy_name}"
     ]
     
+    # Add test case info if available
+    if test_case_info:
+        info_lines.extend([
+            f"Test Case: {test_case_info['id']} ({test_case_info['index']+1}/{test_case_info['total']})",
+            f"Description: {test_case_info['notes'][:40]}{'...' if len(test_case_info['notes']) > 40 else ''}"
+        ])
+    
     # Draw info lines
     draw_text_lines(screen, info_lines, font, (10, 10), Colors.WHITE)
     
@@ -78,6 +85,15 @@ def draw_ui(screen, font, sim, fps, show_vision, policy_name="Unknown"):
         "V - Toggle vision display",
         "ESC - Quit"
     ]
+    
+    # Add test case cycling controls
+    if test_case_info:
+        controls.extend([
+            "N - Next test case",
+            "P - Previous test case", 
+            "R - Reset test case"
+        ])
+    
     if policy_name == "Manual":
         controls.extend([
             "W - Forward thrust (hold)",
@@ -93,7 +109,8 @@ def draw_ui(screen, font, sim, fps, show_vision, policy_name="Unknown"):
 
 
 def run_simulation_gui(policy: PolicyProtocol, config: SimulationConfig = None, 
-                      fps: int = 60, policy_name: str = "Unknown", sim=None, dt: float = None):
+                      fps: int = 60, policy_name: str = "Unknown", sim=None, dt: float = None,
+                      test_case_context=None):
     """Run the pygame GUI with given policy
     
     Args:
@@ -103,6 +120,7 @@ def run_simulation_gui(policy: PolicyProtocol, config: SimulationConfig = None,
         policy_name: Name to display in window title
         sim: Pre-configured simulation (optional)
         dt: Fixed timestep to use (optional, defaults to variable timestep based on fps)
+        test_case_context: Dict with test case cycling info (optional)
     """
     pygame.init()
     
@@ -124,8 +142,62 @@ def run_simulation_gui(policy: PolicyProtocol, config: SimulationConfig = None,
     running = True
     show_vision = True
     
+    # Test case cycling state
+    current_test_case_info = None
+    if test_case_context:
+        current_test_case = test_case_context['test_cases'][test_case_context['current_index']]
+        current_test_case_info = {
+            'id': current_test_case.id,
+            'index': test_case_context['current_index'],
+            'total': len(test_case_context['test_cases']),
+            'notes': current_test_case.notes
+        }
+    
     # Reset policy
     policy.reset()
+    
+    def switch_test_case(new_index):
+        """Switch to a different test case"""
+        nonlocal sim, config, current_test_case_info, policy_name
+        
+        if not test_case_context or new_index < 0 or new_index >= len(test_case_context['test_cases']):
+            return
+        
+        test_case_context['current_index'] = new_index
+        new_test_case = test_case_context['test_cases'][new_index]
+        
+        print(f"Switching to test case: {new_test_case.id}")
+        
+        # Import setup function
+        from scripts.play_sim import setup_simulation_from_testcase, setup_simulation_from_world
+        
+        # Set up new simulation
+        new_sim, new_config = setup_simulation_from_testcase(new_test_case, test_case_context['config'])
+        
+        # Override with world if specified
+        if test_case_context['world_override']:
+            new_sim, new_config = setup_simulation_from_world(test_case_context['world_override'], new_config)
+        
+        if new_sim:
+            sim = new_sim
+            config = new_config
+            
+            # Update test case info
+            current_test_case_info = {
+                'id': new_test_case.id,
+                'index': new_index,
+                'total': len(test_case_context['test_cases']),
+                'notes': new_test_case.notes
+            }
+            
+            # Update policy name
+            base_policy_name = policy_name.split(' (')[0]  # Remove old test case info
+            policy_name = f"{base_policy_name} ({new_test_case.id} - {new_index+1}/{len(test_case_context['test_cases'])})"
+            
+            # Reset policy for new test case
+            policy.reset()
+            
+            print(f"  Description: {new_test_case.notes}")
     
     while running:
         if dt is not None:
@@ -144,6 +216,17 @@ def run_simulation_gui(policy: PolicyProtocol, config: SimulationConfig = None,
             if vision_toggled:
                 # Optional: print vision toggle message
                 pass
+            
+            # Handle test case cycling
+            if test_case_context and event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_n:  # Next test case
+                    next_index = (test_case_context['current_index'] + 1) % len(test_case_context['test_cases'])
+                    switch_test_case(next_index)
+                elif event.key == pygame.K_p:  # Previous test case
+                    prev_index = (test_case_context['current_index'] - 1) % len(test_case_context['test_cases'])
+                    switch_test_case(prev_index)
+                elif event.key == pygame.K_r:  # Reset current test case
+                    switch_test_case(test_case_context['current_index'])
         
         # Get action from policy
         sim_state = sim.get_state()
@@ -194,7 +277,7 @@ def run_simulation_gui(policy: PolicyProtocol, config: SimulationConfig = None,
             screen.blit(strip_label, (strip_x, strip_y - 25))
         
         # Draw UI
-        draw_ui(screen, font, sim, clock.get_fps(), show_vision, policy_name)
+        draw_ui(screen, font, sim, clock.get_fps(), show_vision, policy_name, current_test_case_info)
         
         pygame.display.flip()
     
