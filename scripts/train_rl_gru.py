@@ -28,9 +28,53 @@ from src.eval.load_suite import load_suite
 from src.eval.testcases import TestCase
 from src.eval.world_integration import resolve_test_case_world, apply_world_to_simulation
 from src.sim.batched import BatchedSimulation
+from src.training.test_case_scheduler import TestCaseScheduler, load_scheduler_config
+
+
+def setup_simulation_for_test_case(test_case: TestCase, config: SimulationConfig) -> SimulationSingle:
+    """
+    Set up simulation for a specific test case
+    
+    Args:
+        test_case: Test case to set up
+        config: Base simulation configuration
+        
+    Returns:
+        Configured simulation ready for the test case
+    """
+    world = resolve_test_case_world(test_case)
+    batched_sim = BatchedSimulation(1, config)
+    updated_config = apply_world_to_simulation(batched_sim, world, [test_case])
+    
+    sim = SimulationSingle(updated_config)
+    sim.batched_sim = batched_sim
+    
+    # Set up test case initial state
+    agent_states = [{
+        'x': test_case.agent_start.x,
+        'y': test_case.agent_start.y,
+        'theta': test_case.agent_start.theta,
+        'vx': test_case.agent_start.vx,
+        'vy': test_case.agent_start.vy,
+        'omega': test_case.agent_start.omega,
+        'throttle': test_case.agent_start.throttle
+    }]
+    
+    food_states = [{
+        'x': test_case.food.x,
+        'y': test_case.food.y
+    }]
+    
+    sim.batched_sim.reset_to_states(agent_states, food_states)
+    
+    return sim
 
 
 def extract_run_folder_from_resume_path(resume_path: str) -> str:
+    """Extract the run folder from a resume checkpoint path"""
+    # Resume path should be like: checkpoints/rl_gru_trained_20241230_143022/rl_gru_trained_best.json
+    # We want to extract: checkpoints/rl_gru_trained_20241230_143022
+    return os.path.dirname(resume_path)
     """Extract the run folder from a resume checkpoint path"""
     # Resume path should be like: checkpoints/rl_gru_trained_20241230_143022/rl_gru_trained_best.json
     # We want to extract: checkpoints/rl_gru_trained_20241230_143022
@@ -536,14 +580,6 @@ def update_policy(policy: RLGRUPolicy, optimizer: torch.optim.Optimizer,
     
     T = obs_seq.shape[0]
     
-    # Debug: Print tensor shapes every 50 episodes
-    if episode_num % 50 == 0:
-        print(f"  [DEBUG] Tensor shapes:")
-        print(f"    obs_seq: {obs_seq.shape}")
-        print(f"    action_seq: {action_seq.shape}")
-        print(f"    old_log_prob_seq: {old_log_prob_seq.shape}")
-        print(f"    value_seq: {value_seq.shape}")
-    
     # Compute next value for bootstrapping (if episode didn't terminate)
     if not dones[-1]:
         with torch.no_grad():
@@ -570,22 +606,11 @@ def update_policy(policy: RLGRUPolicy, optimizer: torch.optim.Optimizer,
     # forward_sequence expects [T, obs_dim] and returns [1, T, *] (batch-first)
     action_logits_seq, log_std_seq, new_value_seq, _ = policy.network.forward_sequence(obs_seq, h0)
     
-    # Debug: Print forward_sequence output shapes
-    if episode_num % 50 == 0:
-        print(f"    action_logits_seq (raw): {action_logits_seq.shape}")
-        print(f"    log_std_seq (raw): {log_std_seq.shape}")
-        print(f"    new_value_seq (raw): {new_value_seq.shape}")
-    
     # Squeeze batch dimension since we have batch_size=1
     # forward_sequence returns [1, T, *], we want [T, *]
     action_logits_seq = action_logits_seq.squeeze(0)  # [T, 2]
     log_std_seq = log_std_seq.squeeze(0)              # [T, 2]
     new_value_seq = new_value_seq.squeeze(0)          # [T]
-    
-    if episode_num % 50 == 0:
-        print(f"    action_logits_seq (squeezed): {action_logits_seq.shape}")
-        print(f"    log_std_seq (squeezed): {log_std_seq.shape}")
-        print(f"    new_value_seq (squeezed): {new_value_seq.shape}")
     
     # Compute new log probabilities using squashed Gaussian (vectorized)
     std_seq = torch.exp(log_std_seq)  # [T, 2]
@@ -609,16 +634,6 @@ def update_policy(policy: RLGRUPolicy, optimizer: torch.optim.Optimizer,
     # Apply tanh correction
     tanh_correction = torch.log(1 - action_tanh_clamped.pow(2) + 1e-6).sum(dim=-1)  # [T]
     new_log_prob_seq = log_prob_u_seq - tanh_correction
-    
-    # Sanity check: Compare old vs new log probs for first few timesteps
-    if episode_num % 50 == 0:
-        n_check = min(5, T)
-        log_prob_diff = torch.abs(old_log_prob_seq[:n_check] - new_log_prob_seq[:n_check])
-        print(f"  [SANITY] Log-prob differences (first {n_check} steps):")
-        print(f"    Mean: {log_prob_diff.mean().item():.6f}")
-        print(f"    Max: {log_prob_diff.max().item():.6f}")
-        print(f"    Old log_probs: {old_log_prob_seq[:n_check].tolist()}")
-        print(f"    New log_probs: {new_log_prob_seq[:n_check].tolist()}")
     
     # Policy loss (simplified A2C, no PPO clipping for now)
     policy_loss = -(new_log_prob_seq * advantage_seq).mean()
@@ -651,12 +666,6 @@ def update_policy(policy: RLGRUPolicy, optimizer: torch.optim.Optimizer,
     
     grad_norm_pre_clip = grad_norm_pre_clip ** 0.5
     gru_grad_norm = gru_grad_norm ** 0.5
-    
-    # Debug: Print GRU gradient norms every 50 episodes
-    if episode_num % 50 == 0:
-        print(f"  [GRU CHECK] GRU gradient norm: {gru_grad_norm:.6f}")
-        if gru_grad_norm < 1e-8:
-            print(f"  [WARNING] GRU gradients are very small - may not be training!")
     
     # Gradient clipping
     grad_norm_post_clip = torch.nn.utils.clip_grad_norm_(policy.network.parameters(), clip_grad_norm)
@@ -721,7 +730,11 @@ def main():
     parser.add_argument('--test-suite', type=str, default='data/test_suites/basic_v1.json',
                        help='Test suite for environment setup (default: data/test_suites/basic_v1.json)')
     parser.add_argument('--test-case-id', type=str, default=None,
-                       help='Specific test case ID to use (default: random selection)')
+                       help='Specific test case ID to use (overrides scheduler and suite cycling)')
+    parser.add_argument('--scheduler-config', type=str, default=None,
+                       help='Path to test case scheduler config JSON file (enables weighted sampling)')
+    parser.add_argument('--scheduler-seed', type=int, default=None,
+                       help='Seed for test case scheduler (default: uses main seed + 1000)')
     
     # System parameters
     parser.add_argument('--device', type=str, default='cpu',
@@ -769,8 +782,12 @@ def main():
         print(f"Loaded test suite: {test_suite.suite_id} v{test_suite.version}")
         print(f"Test cases: {len(test_suite.test_cases)}")
         
-        # Select test case
+        # Set up test case selection strategy
+        scheduler = None
+        single_test_case = None
+        
         if args.test_case_id:
+            # Single specific test case mode
             test_case = None
             for case in test_suite.test_cases:
                 if case.id == args.test_case_id:
@@ -781,46 +798,55 @@ def main():
                 available_ids = [case.id for case in test_suite.test_cases]
                 print(f"Available test cases: {', '.join(available_ids)}")
                 return
+            
+            single_test_case = test_case
+            print(f"Using single test case: {test_case.id}")
+            
+        elif args.scheduler_config:
+            # Weighted sampling mode
+            try:
+                weights = load_scheduler_config(args.scheduler_config)
+                scheduler_seed = args.scheduler_seed if args.scheduler_seed is not None else args.seed + 1000
+                scheduler = TestCaseScheduler(test_suite.test_cases, weights, scheduler_seed)
+                print(f"Using weighted scheduler from: {args.scheduler_config}")
+                
+                # Show statistics for the planned training
+                stats = scheduler.get_statistics(args.episodes)
+                print(f"Planned distribution over {args.episodes} episodes:")
+                for case_id, percentage in stats['case_percentages'].items():
+                    if percentage > 0:
+                        print(f"  {case_id}: {percentage:.1f}%")
+                        
+            except Exception as e:
+                print(f"Error loading scheduler config: {e}")
+                return
+                
         else:
-            # Use first test case for now (could randomize later)
-            test_case = test_suite.test_cases[0]
+            # Sequential cycling mode (default when no specific case or scheduler)
+            scheduler_seed = args.scheduler_seed if args.scheduler_seed is not None else args.seed + 1000
+            scheduler = TestCaseScheduler(test_suite.test_cases, None, scheduler_seed)
+            print(f"Using sequential cycling through all {len(test_suite.test_cases)} test cases")
         
-        print(f"Using test case: {test_case.id}")
         print()
         
     except Exception as e:
         print(f"Error loading test suite: {e}")
         return
     
-    # Create simulation
+    # Create base simulation config
     config = SimulationConfig()
     
-    # Set up simulation with test case
+    # Set up initial simulation (will be reconfigured per episode if using scheduler)
     try:
-        world = resolve_test_case_world(test_case)
-        batched_sim = BatchedSimulation(1, config)
-        updated_config = apply_world_to_simulation(batched_sim, world, [test_case])
-        
-        sim = SimulationSingle(updated_config)
-        sim.batched_sim = batched_sim
-        
-        # Set up test case initial state
-        agent_states = [{
-            'x': test_case.agent_start.x,
-            'y': test_case.agent_start.y,
-            'theta': test_case.agent_start.theta,
-            'vx': test_case.agent_start.vx,
-            'vy': test_case.agent_start.vy,
-            'omega': test_case.agent_start.omega,
-            'throttle': test_case.agent_start.throttle
-        }]
-        
-        food_states = [{
-            'x': test_case.food.x,
-            'y': test_case.food.y
-        }]
-        
-        sim.batched_sim.reset_to_states(agent_states, food_states)
+        if single_test_case:
+            # Single test case mode - set up once
+            sim = setup_simulation_for_test_case(single_test_case, config)
+            print(f"Simulation configured for single test case: {single_test_case.id}")
+        else:
+            # Multi-test case mode - set up with first case, will reconfigure per episode
+            initial_test_case = test_suite.test_cases[0]
+            sim = setup_simulation_for_test_case(initial_test_case, config)
+            print(f"Simulation configured for multi-test case training")
         
     except Exception as e:
         print(f"Error setting up simulation: {e}")
@@ -841,10 +867,27 @@ def main():
     # Create episode-specific RNG for deterministic food respawning
     episode_rng = np.random.RandomState(args.seed + 1000)
     
+    # Track previous test case for simulation reconfiguration
+    previous_test_case_id = None
+    
     for episode in range(start_episode, start_episode + args.episodes):
+        # Select test case for this episode
+        if single_test_case:
+            # Single test case mode
+            current_test_case = single_test_case
+        else:
+            # Multi-test case mode - use scheduler
+            current_test_case = scheduler.get_next_test_case(episode)
+            
+            # Reconfigure simulation for the new test case if it changed
+            if episode == start_episode or current_test_case.id != previous_test_case_id:
+                sim = setup_simulation_for_test_case(current_test_case, config)
+            
+            previous_test_case_id = current_test_case.id
+        
         # Run episode
         observations, actions, rewards, log_probs, values, dones, episode_info = run_episode(
-            policy, sim, test_case, args.max_steps, args.dt, episode_rng,
+            policy, sim, current_test_case, args.max_steps, args.dt, episode_rng,
             args.reward_scale, args.time_bonus_coef, args.step_penalty
         )
         
@@ -886,6 +929,7 @@ def main():
             success_rate = recent_successes / recent_episodes if recent_episodes > 0 else 0.0
             
             print(f"Episode {episode:5d} | "
+                  f"Case: {current_test_case.id[:20]:20s} | "
                   f"Reward: {episode_reward:7.2f} | "
                   f"Avg: {avg_reward:7.2f} | "
                   f"Best: {best_reward:7.2f} | "
