@@ -59,6 +59,7 @@ def draw_ui(screen, font, sim, fps, show_vision, policy_name="Unknown", test_cas
     
     # Prepare info lines
     info_lines = [
+        f"Step: {sim_state['step']}",
         f"Throttle: {agent_state['throttle']:.2f}",
         f"Speed: {speed:.1f}",
         f"FPS: {fps:.1f}",

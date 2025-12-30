@@ -243,7 +243,8 @@ def setup_csv_logging(run_dir: str, csv_filename: str) -> str:
                'total_reacquire_bonus,total_progress_reward,total_step_penalty,'
                'min_food_distance_seen,final_food_distance,food_visible_fraction,'
                'policy_loss,value_loss,entropy,total_loss,grad_norm_pre_clip,'
-               'grad_norm_post_clip,gru_grad_norm,training_time_elapsed\n')
+               'grad_norm_post_clip,gru_grad_norm,training_time_elapsed,'
+               'avg_prev_distance,avg_current_distance,avg_raw_progress\n')
     
     return csv_path
 
@@ -274,7 +275,10 @@ def log_to_csv(csv_path: str, episode: int, current_test_case_id: str, episode_i
                    f"{train_metrics['entropy']:.6f},{train_metrics['total_loss']:.6f},"
                    f"{train_metrics['grad_norm_pre_clip']:.6f},"
                    f"{train_metrics['grad_norm_post_clip']:.6f},"
-                   f"{train_metrics['gru_grad_norm']:.6f},{training_time_elapsed:.2f}\n")
+                   f"{train_metrics['gru_grad_norm']:.6f},{training_time_elapsed:.2f},"
+                   f"{episode_info['avg_prev_distance']:.6f},"
+                   f"{episode_info['avg_current_distance']:.6f},"
+                   f"{episode_info['avg_raw_progress']:.6f}\n")
             
             f.write(line)
 
@@ -352,10 +356,13 @@ def compute_reward(step_info: Dict[str, Any], prev_step_info: Optional[Dict[str,
     reward = 0.0
     reward_components = {
         'terminal': 0.0,
-        'reacquire_bonus': 0.0,  # Renamed from visible_bonus
+        'reacquire_bonus': 0.0,
         'progress': 0.0,
         'step_penalty': 0.0,
-        'time_bonus': 0.0
+        'time_bonus': 0.0,
+        'prev_distance': 0.0,      # For debugging: previous distance
+        'current_distance': 0.0,   # For debugging: current distance
+        'raw_progress': 0.0        # For debugging: raw progress before clipping
     }
     
     # 1. Terminal reward (dominant)
@@ -402,16 +409,30 @@ def compute_reward(step_info: Dict[str, Any], prev_step_info: Optional[Dict[str,
             reward += reacquire_bonus
             reward_components['reacquire_bonus'] = reacquire_bonus
         
-        # Update last seen distance for progress tracking
-        last_seen_food_distance = min_food_distance
+        # BUGFIX: Progress reward calculation BEFORE updating last_seen_food_distance
+        # Store current distance for debugging
+        reward_components['current_distance'] = min_food_distance
         
-        # Progress reward using smoothed distance tracking
         if last_seen_food_distance is not None and last_seen_food_distance < float('inf'):
-            progress = last_seen_food_distance - min_food_distance
+            # Store previous distance for debugging
+            reward_components['prev_distance'] = last_seen_food_distance
+            
+            # Calculate progress: positive = getting closer, negative = moving away
+            raw_progress = last_seen_food_distance - min_food_distance
+            reward_components['raw_progress'] = raw_progress
+            
             # Allow small negative progress (backing away penalty) but cap positive progress
-            progress_reward = np.clip(progress, -2.0, 20.0) * reward_scale  # Symmetric range with penalty
+            progress_reward = np.clip(raw_progress, -2.0, 20.0) * reward_scale
             reward += progress_reward
             reward_components['progress'] = progress_reward
+        
+        # NOW update last_seen_food_distance (optionally with EMA smoothing)
+        # Use simple EMA with alpha=0.7 for smoothing (70% new, 30% old)
+        if last_seen_food_distance is not None:
+            ema_alpha = 0.7
+            last_seen_food_distance = ema_alpha * min_food_distance + (1 - ema_alpha) * last_seen_food_distance
+        else:
+            last_seen_food_distance = min_food_distance
             
     else:
         steps_since_food_seen += 1
@@ -459,6 +480,11 @@ def run_episode(policy: RLGRUPolicy, sim: SimulationSingle, test_case: TestCase,
     total_reacquire_bonus = 0.0  # reacquire_bonus from function
     total_progress_reward = 0.0
     total_step_penalty = 0.0
+    
+    # Debug tracking for progress calculation
+    progress_debug_prev_distances = []
+    progress_debug_current_distances = []
+    progress_debug_raw_progress = []
     min_food_distance_seen = float('inf')
     final_food_distance = float('inf')
     food_visible_steps = 0
@@ -536,6 +562,12 @@ def run_episode(policy: RLGRUPolicy, sim: SimulationSingle, test_case: TestCase,
         total_progress_reward += reward_components['progress']
         total_step_penalty += reward_components['step_penalty']
         
+        # Track progress debug info (only when progress calculation happened)
+        if reward_components['prev_distance'] > 0:  # Only when we had a previous distance
+            progress_debug_prev_distances.append(reward_components['prev_distance'])
+            progress_debug_current_distances.append(reward_components['current_distance'])
+            progress_debug_raw_progress.append(reward_components['raw_progress'])
+        
         # Track food distance diagnostics
         vision_hit_types = step_info['vision_hit_types']
         vision_distances = step_info['vision_distances']
@@ -602,7 +634,11 @@ def run_episode(policy: RLGRUPolicy, sim: SimulationSingle, test_case: TestCase,
         'total_step_penalty': total_step_penalty,
         'min_food_distance_seen': min_food_distance_seen if min_food_distance_seen < float('inf') else None,
         'final_food_distance': final_food_distance if final_food_distance < float('inf') else None,
-        'food_visible_fraction': food_visible_steps / total_steps if total_steps > 0 else 0.0
+        'food_visible_fraction': food_visible_steps / total_steps if total_steps > 0 else 0.0,
+        # Progress debug info
+        'avg_prev_distance': np.mean(progress_debug_prev_distances) if progress_debug_prev_distances else 0.0,
+        'avg_current_distance': np.mean(progress_debug_current_distances) if progress_debug_current_distances else 0.0,
+        'avg_raw_progress': np.mean(progress_debug_raw_progress) if progress_debug_raw_progress else 0.0
     }
     
     return observations, actions, rewards, log_probs, values, dones, episode_info

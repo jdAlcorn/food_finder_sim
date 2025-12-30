@@ -98,6 +98,7 @@ class SimulationSingle:
             'vision_hit_types': self._convert_materials_to_hit_types(batch_info['vision_materials'][0]),
             'vision_hit_wall_ids': [None] * len(batch_info['vision_distances'][0]),  # Not used in batched
             'food_collected': int(batch_info['food_collected'][0]),
+            'step_count': int(batch_info['step'][0]),
             'time': float(batch_info['time'][0]),
             'step': int(batch_info['step'][0])
         }
