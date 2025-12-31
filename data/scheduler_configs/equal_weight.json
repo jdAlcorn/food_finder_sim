@@ -1,0 +1,20 @@
+{
+  "description": "Equal weight training across all test cases",
+  "weights": [
+    {
+      "case_id": "near_wall_parallel_north",
+      "weight": 1.0,
+      "description": "Diagonal northeast navigation"
+    },
+    {
+      "case_id": "medium_distance_angled_2",
+      "weight": 1.0,
+      "description": "medium distance angled 2"
+    },
+    {
+      "case_id": "food_behind_north",
+      "weight": 1.0,
+      "description": "Reverse navigation challenge"
+    }
+  ]
+}

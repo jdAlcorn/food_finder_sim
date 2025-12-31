@@ -29,6 +29,7 @@ from src.eval.testcases import TestCase
 from src.eval.world_integration import resolve_test_case_world, apply_world_to_simulation
 from src.sim.batched import BatchedSimulation
 from src.training.test_case_scheduler import TestCaseScheduler, load_scheduler_config
+from src.training.intrinsic_curiosity import IntrinsicCuriosityModule, build_obs_vector
 
 
 def setup_simulation_for_test_case(test_case: TestCase, config: SimulationConfig) -> SimulationSingle:
@@ -241,6 +242,7 @@ def setup_csv_logging(run_dir: str, csv_filename: str) -> str:
         f.write('episode,test_case_id,reward,avg_reward_100,best_reward,episode_length,'
                'success,success_step,success_rate_100,total_terminal_reward,'
                'total_reacquire_bonus,total_progress_reward,total_step_penalty,'
+               'total_intrinsic_reward,total_lost_sight_penalty,lost_sight_penalty_count,'
                'min_food_distance_seen,final_food_distance,food_visible_fraction,'
                'policy_loss,value_loss,entropy,total_loss,grad_norm_pre_clip,'
                'grad_norm_post_clip,gru_grad_norm,training_time_elapsed,'
@@ -269,6 +271,9 @@ def log_to_csv(csv_path: str, episode: int, current_test_case_id: str, episode_i
                    f"{episode_info['total_reacquire_bonus']:.6f},"
                    f"{episode_info['total_progress_reward']:.6f},"
                    f"{episode_info['total_step_penalty']:.6f},"
+                   f"{episode_info['total_intrinsic_reward']:.6f},"
+                   f"{episode_info['total_lost_sight_penalty']:.6f},"
+                   f"{episode_info['lost_sight_penalty_count']},"
                    f"{min_dist:.6f},{final_dist:.6f},"
                    f"{episode_info['food_visible_fraction']:.6f},"
                    f"{train_metrics['policy_loss']:.6f},{train_metrics['value_loss']:.6f},"
@@ -328,7 +333,12 @@ def compute_reward(step_info: Dict[str, Any], prev_step_info: Optional[Dict[str,
                    food_collected_this_step: bool, steps_since_food_seen: int, 
                    step_idx: int, max_steps: int = 600, reward_scale: float = 1.0,
                    time_bonus_coef: float = 0.0, step_penalty: float = 0.001,
-                   last_seen_food_distance: Optional[float] = None) -> Tuple[float, int, Dict[str, float], Optional[float]]:
+                   last_seen_food_distance: Optional[float] = None,
+                   curiosity_module: Optional[IntrinsicCuriosityModule] = None,
+                   action: Optional[Dict[str, float]] = None,
+                   v_scale: float = 400.0, omega_scale: float = 10.0,
+                   lost_sight_penalty_k: float = 5.0,
+                   normalize_rewards: bool = False) -> Tuple[float, int, Dict[str, float], Optional[float]]:
     """
     Compute reward with sensor-based shaping (consistent schema) and detailed component tracking
     
@@ -337,6 +347,8 @@ def compute_reward(step_info: Dict[str, Any], prev_step_info: Optional[Dict[str,
     - ADDED reacquire-only bonus when food becomes visible after being invisible
     - ADDED smoothed progress tracking with grace period for brief vision flicker
     - ADDED small negative progress penalty to discourage backing away from food
+    - ADDED intrinsic curiosity reward based on sensor prediction error
+    - ADDED lost-sight penalty when food was visible but is no longer visible
     
     Args:
         step_info: Current step info from sim.step()
@@ -349,6 +361,11 @@ def compute_reward(step_info: Dict[str, Any], prev_step_info: Optional[Dict[str,
         time_bonus_coef: Coefficient for time-to-success bonus
         step_penalty: Per-step penalty
         last_seen_food_distance: Trainer-side memory of last observed food distance
+        curiosity_module: Optional intrinsic curiosity module
+        action: Action taken this step (for curiosity)
+        v_scale: Velocity normalization scale
+        omega_scale: Angular velocity normalization scale
+        lost_sight_penalty_k: Multiplier for lost-sight penalty (default: 5.0)
         
     Returns:
         Tuple of (reward, updated_steps_since_food_seen, reward_components_dict, updated_last_seen_food_distance)
@@ -360,6 +377,8 @@ def compute_reward(step_info: Dict[str, Any], prev_step_info: Optional[Dict[str,
         'progress': 0.0,
         'step_penalty': 0.0,
         'time_bonus': 0.0,
+        'intrinsic': 0.0,           # Intrinsic curiosity reward
+        'lost_sight_penalty': 0.0,  # Lost-sight penalty
         'prev_distance': 0.0,      # For debugging: previous distance
         'current_distance': 0.0,   # For debugging: current distance
         'raw_progress': 0.0        # For debugging: raw progress before clipping
@@ -373,6 +392,11 @@ def compute_reward(step_info: Dict[str, Any], prev_step_info: Optional[Dict[str,
         reward_components['terminal'] = terminal_reward
         reward_components['time_bonus'] = time_bonus
         steps_since_food_seen = 0
+        
+        # Apply normalization if enabled, then return
+        if normalize_rewards:
+            reward = 0.9  # Strong positive reward for success
+        
         return reward, steps_since_food_seen, reward_components, None
     
     # 2. Food visibility and proximity shaping (sensor-derived only)
@@ -437,6 +461,28 @@ def compute_reward(step_info: Dict[str, Any], prev_step_info: Optional[Dict[str,
     else:
         steps_since_food_seen += 1
         
+        # LOST-SIGHT PENALTY: Apply when food was visible last step but not this step
+        if prev_food_visible and prev_step_info is not None:
+            # Calculate base penalty
+            base_penalty = -lost_sight_penalty_k * reward_scale
+            
+            # Optional: Reduce penalty if this was a strategic turn with forward progress
+            penalty_reduction = 1.0
+            if action is not None and last_seen_food_distance is not None:
+                # Check if agent was turning and moving forward
+                steer_magnitude = abs(action.get('steer', 0.0))
+                throttle = action.get('throttle', 0.0)
+                
+                # If significant steering + forward throttle, this might be strategic
+                if steer_magnitude > 0.3 and throttle > 0.2:
+                    # Check if we had recent progress before losing sight
+                    if reward_components['raw_progress'] > 0:
+                        penalty_reduction = 0.25  # Reduce penalty to 25%
+            
+            lost_sight_penalty = base_penalty * penalty_reduction
+            reward += lost_sight_penalty
+            reward_components['lost_sight_penalty'] = lost_sight_penalty
+        
         # Grace period: retain last_seen_food_distance for brief vision flicker
         # After 5 steps without seeing food, clear the distance memory
         if steps_since_food_seen > 5:
@@ -447,12 +493,36 @@ def compute_reward(step_info: Dict[str, Any], prev_step_info: Optional[Dict[str,
     reward += step_penalty_val
     reward_components['step_penalty'] = step_penalty_val
     
+    # 4. Intrinsic curiosity reward (only when prev_step_info is available)
+    if curiosity_module is not None and prev_step_info is not None and action is not None:
+        intrinsic_reward, curiosity_debug = curiosity_module.compute_intrinsic_reward(
+            prev_step_info, action, step_info, food_visible, steps_since_food_seen,
+            v_scale, omega_scale
+        )
+        reward += intrinsic_reward
+        reward_components['intrinsic'] = intrinsic_reward
+    
+    # 5. Reward normalization to [-1, 1] range (optional)
+    if normalize_rewards:
+        # Non-terminal rewards: scale to reasonable range
+        # Progress: [-2, 20] -> [-0.1, 0.4] 
+        # Penalties: [-20, 0] -> [-0.4, 0]
+        # Step penalty: ~-0.001 per step -> very small
+        
+        # Simple linear scaling for non-terminal rewards
+        # Clamp total non-terminal reward to reasonable range then scale
+        clamped_reward = np.clip(reward, -50.0, 50.0)  # Reasonable bounds
+        reward = clamped_reward / 50.0  # Scale to [-1, 1]
+        reward = np.clip(reward, -1.0, 1.0)  # Ensure bounds
+    
     return reward, steps_since_food_seen, reward_components, last_seen_food_distance
 
 
 def run_episode(policy: RLGRUPolicy, sim: SimulationSingle, test_case: TestCase, max_steps: int, 
                 dt: float, episode_rng: np.random.RandomState, reward_scale: float = 1.0,
-                time_bonus_coef: float = 0.0, step_penalty: float = 0.001) -> Tuple[List[torch.Tensor], List[torch.Tensor], List[float], 
+                time_bonus_coef: float = 0.0, step_penalty: float = 0.001,
+                curiosity_module: Optional[IntrinsicCuriosityModule] = None,
+                lost_sight_penalty_k: float = 5.0, normalize_rewards: bool = False) -> Tuple[List[torch.Tensor], List[torch.Tensor], List[float], 
                                    List[torch.Tensor], List[torch.Tensor], List[bool], Dict[str, Any]]:
     """
     Run a single episode and collect rollout data
@@ -480,6 +550,9 @@ def run_episode(policy: RLGRUPolicy, sim: SimulationSingle, test_case: TestCase,
     total_reacquire_bonus = 0.0  # reacquire_bonus from function
     total_progress_reward = 0.0
     total_step_penalty = 0.0
+    total_intrinsic_reward = 0.0  # Track intrinsic curiosity reward
+    total_lost_sight_penalty = 0.0  # Track lost-sight penalty
+    lost_sight_penalty_count = 0  # Count of lost-sight penalty applications
     
     # Debug tracking for progress calculation
     progress_debug_prev_distances = []
@@ -553,7 +626,9 @@ def run_episode(policy: RLGRUPolicy, sim: SimulationSingle, test_case: TestCase,
         # Compute reward with detailed tracking
         reward, steps_since_food_seen, reward_components, last_seen_food_distance = compute_reward(
             step_info, prev_sim_state, food_collected_this_step, steps_since_food_seen, step,
-            max_steps, reward_scale, time_bonus_coef, step_penalty, last_seen_food_distance
+            max_steps, reward_scale, time_bonus_coef, step_penalty, last_seen_food_distance,
+            curiosity_module, sim_action, policy.v_scale, policy.omega_scale, lost_sight_penalty_k,
+            normalize_rewards
         )
         
         # Track reward components
@@ -561,6 +636,12 @@ def run_episode(policy: RLGRUPolicy, sim: SimulationSingle, test_case: TestCase,
         total_reacquire_bonus += reward_components['reacquire_bonus']
         total_progress_reward += reward_components['progress']
         total_step_penalty += reward_components['step_penalty']
+        total_intrinsic_reward += reward_components['intrinsic']
+        total_lost_sight_penalty += reward_components['lost_sight_penalty']
+        
+        # Count lost-sight penalty applications
+        if reward_components['lost_sight_penalty'] < 0:
+            lost_sight_penalty_count += 1
         
         # Track progress debug info (only when progress calculation happened)
         if reward_components['prev_distance'] > 0:  # Only when we had a previous distance
@@ -632,6 +713,9 @@ def run_episode(policy: RLGRUPolicy, sim: SimulationSingle, test_case: TestCase,
         'total_reacquire_bonus': total_reacquire_bonus,  # reacquire_bonus
         'total_progress_reward': total_progress_reward,
         'total_step_penalty': total_step_penalty,
+        'total_intrinsic_reward': total_intrinsic_reward,
+        'total_lost_sight_penalty': total_lost_sight_penalty,
+        'lost_sight_penalty_count': lost_sight_penalty_count,
         'min_food_distance_seen': min_food_distance_seen if min_food_distance_seen < float('inf') else None,
         'final_food_distance': final_food_distance if final_food_distance < float('inf') else None,
         'food_visible_fraction': food_visible_steps / total_steps if total_steps > 0 else 0.0,
@@ -797,6 +881,28 @@ def main():
                        help='Time-to-success bonus coefficient (default: 0.0)')
     parser.add_argument('--step-penalty', type=float, default=0.001,
                        help='Per-step penalty (default: 0.001)')
+    parser.add_argument('--lost-sight-penalty-k', type=float, default=5.0,
+                       help='Lost-sight penalty multiplier (default: 5.0)')
+    parser.add_argument('--normalize-rewards', action='store_true',
+                       help='Normalize rewards to [-1, 1] range using tanh scaling')
+    
+    # Intrinsic curiosity parameters
+    parser.add_argument('--enable-curiosity', action='store_true',
+                       help='Enable intrinsic curiosity module')
+    parser.add_argument('--curiosity-eta', type=float, default=0.05,
+                       help='Intrinsic reward scaling factor (default: 0.05)')
+    parser.add_argument('--curiosity-r-max', type=float, default=2.0,
+                       help='Maximum intrinsic reward (default: 2.0)')
+    parser.add_argument('--curiosity-train-every', type=int, default=1,
+                       help='Train forward model every N steps (default: 1)')
+    parser.add_argument('--curiosity-batch-size', type=int, default=128,
+                       help='Forward model training batch size (default: 128)')
+    parser.add_argument('--curiosity-lr', type=float, default=1e-3,
+                       help='Forward model learning rate (default: 1e-3)')
+    parser.add_argument('--curiosity-buffer-capacity', type=int, default=50000,
+                       help='Replay buffer capacity (default: 50000)')
+    parser.add_argument('--curiosity-warmup', type=int, default=1000,
+                       help='Steps before starting forward model training (default: 1000)')
     
     # Model parameters
     parser.add_argument('--encoder-dims', type=int, nargs='+', default=[256, 128],
@@ -833,8 +939,8 @@ def main():
                        help='Output directory for checkpoints (default: checkpoints)')
     parser.add_argument('--save-prefix', type=str, default='rl_gru_trained',
                        help='Prefix for saved checkpoint files (default: rl_gru_trained)')
-    parser.add_argument('--save-interval', type=int, default=100,
-                       help='Save checkpoint every N episodes (default: 100)')
+    parser.add_argument('--save-interval', type=int, default=50,
+                       help='Save checkpoint every N episodes (default: 50)')
     parser.add_argument('--log-interval', type=int, default=10,
                        help='Log progress every N episodes (default: 10)')
     parser.add_argument('--detailed-log-interval', type=int, default=50,
@@ -864,6 +970,10 @@ def main():
     print(f"GRU hidden size: {args.hidden_size}")
     if args.resume:
         print(f"Resuming from: {args.resume}")
+    if args.enable_curiosity:
+        print(f"Intrinsic curiosity enabled: eta={args.curiosity_eta}, r_max={args.curiosity_r_max}")
+    if args.normalize_rewards:
+        print(f"Reward normalization enabled: rewards will be scaled to [-1, 1]")
     print()
     
     # Load test suite
@@ -948,6 +1058,26 @@ def main():
     # Initialize policy and optimizer (with optional resume)
     policy, optimizer, start_episode, best_reward, episode_rewards, episode_lengths, food_collected_counts = initialize_policy_and_optimizer(args)
     
+    # Initialize intrinsic curiosity module if enabled
+    curiosity_module = None
+    if args.enable_curiosity:
+        # Calculate observation dimension (same as policy input)
+        obs_dim = len(build_obs_vector({'vision_distances': [None] * 128, 'vision_hit_types': [None] * 128, 
+                                       'agent_state': {'vx': 0, 'vy': 0, 'theta': 0, 'omega': 0, 'throttle': 0}}))
+        
+        curiosity_module = IntrinsicCuriosityModule(
+            obs_dim=obs_dim,
+            device=policy.device,
+            eta=args.curiosity_eta,
+            r_max=args.curiosity_r_max,
+            train_every=args.curiosity_train_every,
+            batch_size=args.curiosity_batch_size,
+            lr=args.curiosity_lr,
+            buffer_capacity=args.curiosity_buffer_capacity,
+            warmup_steps=args.curiosity_warmup
+        )
+        print(f"Initialized curiosity module with obs_dim={obs_dim}")
+    
     print(f"Saving to: {run_dir}")
     
     # Setup CSV logging
@@ -979,10 +1109,15 @@ def main():
             
             previous_test_case_id = current_test_case.id
         
+        # Reset curiosity module episode statistics
+        if curiosity_module is not None:
+            curiosity_module.reset_episode_stats()
+        
         # Run episode
         observations, actions, rewards, log_probs, values, dones, episode_info = run_episode(
             policy, sim, current_test_case, args.max_steps, args.dt, episode_rng,
-            args.reward_scale, args.time_bonus_coef, args.step_penalty
+            args.reward_scale, args.time_bonus_coef, args.step_penalty, curiosity_module,
+            args.lost_sight_penalty_k, args.normalize_rewards
         )
         
         # Update policy
@@ -1041,19 +1176,31 @@ def main():
                 print(f"  Rewards: T={episode_info['total_terminal_reward']:.1f}, "
                       f"R={episode_info['total_reacquire_bonus']:.1f}, "  # R for Reacquire
                       f"P={episode_info['total_progress_reward']:.1f}, "
-                      f"S={episode_info['total_step_penalty']:.3f}")
+                      f"S={episode_info['total_step_penalty']:.3f}, "
+                      f"I={episode_info['total_intrinsic_reward']:.3f}, "  # I for Intrinsic
+                      f"L={episode_info['total_lost_sight_penalty']:.3f}")  # L for Lost-sight
                 min_dist_str = f"{episode_info['min_food_distance_seen']:.1f}" if episode_info['min_food_distance_seen'] is not None else "N/A"
                 final_dist_str = f"{episode_info['final_food_distance']:.1f}" if episode_info['final_food_distance'] is not None else "N/A"
                 
                 print(f"  Food: MinDist={min_dist_str}, "
                       f"FinalDist={final_dist_str}, "
-                      f"VisFrac={episode_info['food_visible_fraction']:.2f}")
+                      f"VisFrac={episode_info['food_visible_fraction']:.2f}, "
+                      f"LostSightCount={episode_info['lost_sight_penalty_count']}")
                 print(f"  Training: PL={train_metrics['policy_loss']:.4f}, "
                       f"VL={train_metrics['value_loss']:.4f}, "
                       f"GradPre={train_metrics['grad_norm_pre_clip']:.4f}, "
                       f"GradPost={train_metrics['grad_norm_post_clip']:.4f}, "
                       f"GRU_Grad={train_metrics['gru_grad_norm']:.4f}, "
                       f"Clipped={'Y' if train_metrics['grad_clipped'] else 'N'}")
+                
+                # Add curiosity statistics if enabled
+                if curiosity_module is not None:
+                    curiosity_stats = curiosity_module.get_statistics()
+                    print(f"  Curiosity: AvgR={curiosity_stats['avg_intrinsic_reward']:.4f}, "
+                          f"Loss={curiosity_stats['avg_forward_loss']:.4f}, "
+                          f"Active={curiosity_stats['curiosity_active_fraction']:.2f}, "
+                          f"Buffer={curiosity_stats['buffer_size']}")
+                
                 print()
         
         # Save periodic checkpoints

@@ -1,0 +1,30 @@
+{
+  "description": "Basic training schedule focusing on core navigation scenarios",
+  "weights": [
+    {
+      "case_id": "center_to_corner_NE_facing_north",
+      "weight": 0.3,
+      "description": "Primary diagonal navigation case"
+    },
+    {
+      "case_id": "food_behind_north",
+      "weight": 0.2,
+      "description": "Challenging reverse navigation"
+    },
+    {
+      "case_id": "center_to_corner_SE_facing_south",
+      "weight": 0.2,
+      "description": "Alternative diagonal case"
+    },
+    {
+      "case_id": "center_to_corner_SW_facing_west",
+      "weight": 0.15,
+      "description": "Western diagonal case"
+    },
+    {
+      "case_id": "diagonal_NE_to_SW",
+      "weight": 0.15,
+      "description": "Long diagonal navigation"
+    }
+  ]
+}
