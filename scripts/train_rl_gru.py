@@ -592,25 +592,13 @@ def run_episode(policy: RLGRUPolicy, sim: SimulationSingle, test_case: TestCase,
     sim_state = sim.get_state()
     prev_sim_state = None
     
-    # Move observation building outside the loop
-    from src.policy.obs import build_observation
-    
     for step in range(max_steps):
-        # Build observation
-        obs = build_observation(sim_state, policy.v_scale, policy.omega_scale)
-        obs_tensor = torch.tensor(obs, dtype=torch.float32, device=policy.device).unsqueeze(0)
-        
         # Store hidden state before action
         hidden_states.append(policy._hidden_state.clone())
         
-        # Get action from policy
+        # Get action from policy using proper interface
         with torch.no_grad():
-            action, log_prob, value, new_hidden = policy.network.act(
-                obs_tensor, policy._hidden_state, deterministic=False
-            )
-        
-        # Update hidden state
-        policy._hidden_state = new_hidden.detach()
+            action, log_prob, value, new_hidden = policy.act_training(sim_state, deterministic=False)
         
         # Convert action to simulation format - NO CLIPPING since action is already bounded
         action_np = action.cpu().numpy()[0]
@@ -672,7 +660,12 @@ def run_episode(policy: RLGRUPolicy, sim: SimulationSingle, test_case: TestCase,
         total_steps += 1
         
         # Store rollout data
-        observations.append(obs_tensor.squeeze(0))
+        # We need the observation tensor for training, so build it here
+        from src.policy.obs import build_observation
+        obs = build_observation(sim_state, policy.v_scale, policy.omega_scale)
+        obs_tensor = torch.tensor(obs, dtype=torch.float32, device=policy.device)
+        
+        observations.append(obs_tensor)
         actions.append(action.squeeze(0))
         rewards.append(reward)
         log_probs.append(log_prob.squeeze(0))

@@ -133,6 +133,8 @@ def main():
                        help='Fixed timestep for physics simulation (default: variable based on FPS)')
     parser.add_argument('--fps', type=int, default=60,
                        help='Frames per second (default: 60)')
+    parser.add_argument('--debug-vision', action='store_true',
+                       help='Show food vision metrics debug info on GUI (default: off)')
     
     args = parser.parse_args()
     
@@ -197,6 +199,16 @@ def main():
                     print(f"Generation: {metadata['generation']}")
                 if 'best_fitness' in metadata:
                     print(f"Best fitness: {metadata['best_fitness']:.2f}")
+                if 'episode' in metadata:
+                    print(f"Episode: {metadata['episode']}")
+                if 'best_reward' in metadata:
+                    print(f"Best reward: {metadata['best_reward']:.2f}")
+                if 'training_method' in metadata:
+                    print(f"Training method: {metadata['training_method']}")
+                if 'success_rate_last_100' in metadata:
+                    print(f"Success rate: {metadata['success_rate_last_100']:.1%}")
+                if 'avg_reward_last_100' in metadata:
+                    print(f"Avg reward (100-ep): {metadata['avg_reward_last_100']:.2f}")
             
         except Exception as e:
             print(f"Error loading agent from {args.checkpoint}: {e}")
@@ -305,7 +317,8 @@ def main():
             policy_name=policy_name,
             sim=sim,
             dt=args.dt,
-            test_case_context=test_case_context
+            test_case_context=test_case_context,
+            debug_vision=args.debug_vision
         )
         
     except ImportError:

@@ -7,6 +7,7 @@ Extracted from neural network policies for reuse in training
 import math
 import numpy as np
 from typing import Dict, Any, List, Optional, Tuple
+from src.sim.batched.scene import MATERIAL_NONE, MATERIAL_WALL, MATERIAL_FOOD
 
 
 def extract_vision_features(vision_distances: List[float], vision_hit_types: List[Optional[str]], 
@@ -140,3 +141,76 @@ def build_observation(sim_state: Dict[str, Any], v_scale: float = 400.0,
     assert not np.any(np.isinf(observation)), "Observation contains infinite values"
     
     return observation
+
+def build_observation_visual(sim_state: Dict[str, Any], v_scale: float = 400.0, 
+                     omega_scale: float = 10.0) -> np.ndarray:
+    """
+    Build complete vision-based egocentric observation vector
+    
+    Args:
+        sim_state: Full simulation state
+        v_scale: Velocity normalization scale
+        omega_scale: Angular velocity normalization scale
+        
+    Returns:
+        Observation vector of shape (num_rays * 3 + 4,)
+    """
+    # Extract vision data
+    vision_distances = sim_state['vision_distances']
+    vision_hit_types = sim_state['vision_hit_types']
+    agent_state = sim_state['agent_state']
+    
+    # Get max range from vision system
+    vision_strip = build_vision_strip(vision_distances, vision_hit_types)
+    proprioception = extract_proprioception(agent_state, v_scale, omega_scale)
+    
+    # Concatenate all features
+    observation = np.concatenate([
+        vision_strip,
+        proprioception   # 4 floats
+    ])
+    
+    # Verify observation integrity
+    expected_length = len(vision_distances) * 3 + 4
+    assert len(observation) == expected_length, f"Observation length mismatch: {len(observation)} != {expected_length}"
+    assert not np.any(np.isnan(observation)), "Observation contains NaN values"
+    assert not np.any(np.isinf(observation)), "Observation contains infinite values"
+    
+    return observation
+
+def build_vision_strip(
+    distances: np.ndarray,
+    materials: np.ndarray,
+    max_range: float = 300.0,
+    num_channels: int = 3
+) -> np.ndarray:
+    """
+    Build 1D vision image from raycast results.
+
+    Args:
+        distances: [R] ray distances
+        materials: [R] material IDs (e.g. FOOD, WALL, NONE)
+        max_range: max ray distance
+        num_channels: number of vision channels (default 3)
+
+    Returns:
+        vision: np.ndarray of shape [C, R], values in [0, 1]
+    """
+    R = distances.shape[0]
+    vision = np.zeros((num_channels, R), dtype=np.float32)
+
+    # Brightness: closer = brighter
+    brightness = np.clip(1.0 - distances / max_range, 0.0, 1.0)
+
+    for i in range(R):
+        mat = materials[i]
+        b = brightness[i]
+
+        if mat == MATERIAL_FOOD:
+            vision[1, i] = b          # food channel
+        elif mat == MATERIAL_WALL:
+            vision[0, i] = b          # wall channel
+        else:
+            vision[2, i] = b          # empty / background
+
+    return vision

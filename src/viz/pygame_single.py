@@ -48,7 +48,7 @@ def draw_vision(screen, sim, show_vision):
     
     draw_vision_from_simulation(screen, sim)
 
-def draw_ui(screen, font, sim, fps, show_vision, policy_name="Unknown", test_case_info=None):
+def draw_ui(screen, font, sim, fps, show_vision, policy_name="Unknown", test_case_info=None, debug_vision=False, paused=False):
     """Draw UI information"""
     sim_state = sim.get_state()
     agent_state = sim_state['agent_state']
@@ -66,6 +66,7 @@ def draw_ui(screen, font, sim, fps, show_vision, policy_name="Unknown", test_cas
         f"Position: ({agent_state['x']:.1f}, {agent_state['y']:.1f})",
         f"Heading: {heading_degrees:.1f}°",
         f"Vision: {'ON' if show_vision else 'OFF'}",
+        f"Paused: {'YES' if paused else 'NO'}",
         f"Food collected: {sim_state['food_collected']}",
         f"Policy: {policy_name}"
     ]
@@ -77,6 +78,27 @@ def draw_ui(screen, font, sim, fps, show_vision, policy_name="Unknown", test_cas
             f"Description: {test_case_info['notes'][:40]}{'...' if len(test_case_info['notes']) > 40 else ''}"
         ])
     
+    # Add vision debug info if enabled
+    if debug_vision:
+        from src.sim.vision_utils import calculate_food_vision_metrics
+        
+        vision_metrics = calculate_food_vision_metrics(
+            agent_state,
+            sim_state['food_position'],
+            sim_state['vision_distances'],
+            sim_state['vision_hit_types'],
+            sim.config.fov_degrees,
+            sim.config.num_rays
+        )
+        
+        info_lines.extend([
+            "--- Vision Debug ---",
+            f"Food visible: {vision_metrics['food_visible']}",
+            f"Food distance: {vision_metrics['closest_food_distance']:.1f}" if vision_metrics['closest_food_distance'] else "Food distance: N/A",
+            f"Rays from center: {vision_metrics['food_rays_from_center']}" if vision_metrics['food_rays_from_center'] is not None else "Rays from center: N/A",
+            f"Actual distance: {vision_metrics['actual_food_distance']:.1f}"
+        ])
+    
     # Draw info lines
     draw_text_lines(screen, info_lines, font, (10, 10), Colors.WHITE)
     
@@ -84,6 +106,7 @@ def draw_ui(screen, font, sim, fps, show_vision, policy_name="Unknown", test_cas
     controls = [
         "Controls:",
         "V - Toggle vision display",
+        "SPACE - Pause/Resume",
         "ESC - Quit"
     ]
     
@@ -111,7 +134,7 @@ def draw_ui(screen, font, sim, fps, show_vision, policy_name="Unknown", test_cas
 
 def run_simulation_gui(policy: PolicyProtocol, config: SimulationConfig = None, 
                       fps: int = 60, policy_name: str = "Unknown", sim=None, dt: float = None,
-                      test_case_context=None):
+                      test_case_context=None, debug_vision: bool = False):
     """Run the pygame GUI with given policy
     
     Args:
@@ -142,6 +165,7 @@ def run_simulation_gui(policy: PolicyProtocol, config: SimulationConfig = None,
     # Game state
     running = True
     show_vision = True
+    paused = False
     
     # Test case cycling state
     current_test_case_info = None
@@ -218,6 +242,11 @@ def run_simulation_gui(policy: PolicyProtocol, config: SimulationConfig = None,
                 # Optional: print vision toggle message
                 pass
             
+            # Handle pause toggle
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
+                paused = not paused
+                print(f"Simulation {'PAUSED' if paused else 'RESUMED'}")
+            
             # Handle test case cycling
             if test_case_context and event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_n:  # Next test case
@@ -229,16 +258,20 @@ def run_simulation_gui(policy: PolicyProtocol, config: SimulationConfig = None,
                 elif event.key == pygame.K_r:  # Reset current test case
                     switch_test_case(test_case_context['current_index'])
         
-        # Get action from policy
-        sim_state = sim.get_state()
-        action = policy.act(sim_state)
-        
-        # Update simulation
-        step_info = sim.step(sim_dt, action)
-        
-        # Print food collection
-        if step_info['food_collected_this_step']:
-            print(f"FOOD REACHED! Total collected: {step_info['food_collected']}")
+        # Get action from policy and update simulation (only when not paused)
+        if not paused:
+            sim_state = sim.get_state()
+            action = policy.act(sim_state)
+            
+            # Update simulation
+            step_info = sim.step(sim_dt, action)
+            
+            # Print food collection
+            if step_info['food_collected_this_step']:
+                print(f"FOOD REACHED! Total collected: {step_info['food_collected']}")
+        else:
+            # When paused, just get current state without updating
+            step_info = sim.get_state()
         
         # Render
         screen.fill(Colors.BLACK)
@@ -278,7 +311,7 @@ def run_simulation_gui(policy: PolicyProtocol, config: SimulationConfig = None,
             screen.blit(strip_label, (strip_x, strip_y - 25))
         
         # Draw UI
-        draw_ui(screen, font, sim, clock.get_fps(), show_vision, policy_name, current_test_case_info)
+        draw_ui(screen, font, sim, clock.get_fps(), show_vision, policy_name, current_test_case_info, debug_vision, paused)
         
         pygame.display.flip()
     
